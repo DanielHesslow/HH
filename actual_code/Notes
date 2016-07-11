@@ -1,0 +1,179 @@
+// What is TE?
+// TE is an experimental text editor aimed at finding tecniques for making _me_ more productive
+
+// What is it not?
+// A stable editor for day-to-day code editing, if that's what you're looking for I'd recommend 4coder. 
+
+//What does that mean?
+// it means that making it play nice with traditional editors is not top priority
+// it means that it might change whitespaces and fuck up your diff files 
+// it means that while I might optimize a very hot function I will make that function run less times. 
+// that usually means lockcing down the inner workings of the program and I am not willing to do that at the moment.
+	// flexibility is key!
+
+//Why not OOP?
+	// Every programmer has their weakpoints, places where you usually create bugs and write bad code
+	// A coding style should reflect that and sand down those weakpoints
+	// I've not yet find any problem where oop helps _me_ save time.
+	// you're free to (and should) use what ever suits you best. 
+
+//Why not use a garbage collected language
+
+	// memory managment really isn't that big of a problem for me.
+	// while strings a paint in C the ability to do whateverthefuckIwant with memory certainly outweighs that
+
+// things to implement
+// subscript
+// real fucking devide
+
+
+
+Notes
+Things I in my editor.
+
+So that swapping these should work properly:
+
+remove relative indtntion on copy,
+paste on same indentin layer.
+
+
+for (int i = 0; i< 10; i++){
+	
+	for (int j = 0; j< 10; j++){
+
+	}
+}
+
+word jump right from _helloYou should end up on hello_You not helloYou_ maybe not though?
+
+
+Headers and background color to separate big files. this is kinda important :)
+
+// ---- Bitmaps 
+
+
+
+Actually parse it right. ie grab members of structs and stuff.
+
+
+
+Region is indicated as following
+
+
+//////////////////////////////////////////////////////////////////////////////
+//
+// Title
+//
+
+or
+
+//////// Title
+
+
+hrmm...
+
+
+
+Features:
+	alignment
+	and real devide!
+	whitespace insencitive?
+
+
+
+Text rendering thingi:
+	allignments
+	fuck whitespaces
+
+
+
+
+a * i  == x
+a * yx == z
+
+i     = 1
+i + 1 = 2
+i + 2 = 3
+
+
+
+if(x==0) x = dosomething();
+y = 			doSomething();
+
+
+we should only care about same indention levels.
+aligning across them is wierd. except for \
+
+
+case 1:
+abc 
+break;
+
+
+indentation rules:
+
+{ ++indent
+	
+} --indent
+
+case ++indent 
+
+following break --indent
+
+ex:
+case x:
+	abc 
+	break;
+case y:
+	efg
+	breka;
+
+if(asdasdsa) ++indent
+	--indent
+
+fucntion(long long argumentList, sighed long int someArgument, ++indent
+	bool onNextLine)	--indent
+
+
+
+
+Question:
+	ignore whitespace and autoindent correctly
+					or 
+	elastic tabs + align same char columns?
+
+implement both ones?
+(I'm leaning towards the first one but it probably needs a working ast.)
+
+
+
+ast matching using polish notation?
+	+ num + float float
+
+
+
+
+
+
+
+current style....
+this should me cleand up at some point!
+
+calls that can fail = 
+	returnvalue func(input,input,bool *success);
+
+functions camaelCase
+data 	  PascalCase
+DataStructure functions PascalCase ie. Add, Remove,
+MACRO_FUNCTIONS: DO_SOMETHING()
+MACRO_Definitions: DEFINE_MacroDefinition(type)
+	(see DEFINE_DynamicArray(type))
+
+
+
+
+
+
+
+
+
