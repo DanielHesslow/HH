@@ -469,25 +469,23 @@ constexpr DHSTR_String DHSTR_makeString_(char *string, size_t len)
 {
 	return { string, len };
 }
-#include "..\libs\ConvertUTF.h"
+//#include "..\libs\ConvertUTF.h"
 #define DHSTR_STRING_FROM_UTF16(allocator,string) DHSTR_makeString_(string,allocator(DHSTR_strlen(string)*4),DHSTR_strlen(string)*4)
 DHSTR_String DHSTR_makeString_(char16_t *string, void *buffer, int bufferlen)
 {
-	char *buffer_before = (char *)buffer;
-	size_t len = DHSTR_strlen(string);
-	ConversionResult result = ConvertUTF16toUTF8((const char16_t **)&string, string + len, (unsigned char **)&buffer, ((unsigned char *)buffer) + bufferlen, lenientConversion);
-	assert(result == conversionOK);
-	return DHSTR_makeString_((char *)buffer_before, ((char *)buffer)-buffer_before); 
+	int32_t errors;
+	size_t new_len_in_bytes = utf16toutf8((uint16_t *)string, DHSTR_strlen(string) * sizeof(char16_t), (char *) buffer, bufferlen, &errors);
+	assert(errors == UTF8_ERR_NONE);
+	return DHSTR_makeString_((char *)buffer, new_len_in_bytes); 
 }
 
 #define DHSTR_STRING_FROM_UTF32(allocator,string) DHSTR_makeString_(string,allocator(DHSTR_strlen(string)*4),DHSTR_strlen(string)*4)
 DHSTR_String DHSTR_makeString_(char32_t *string, void *buffer, int bufferlen)
 {
-	char *buffer_before = (char *)buffer;
-	size_t len = DHSTR_strlen(string);
-	ConversionResult result = ConvertUTF32toUTF8((const char32_t **)&string, string + len, (unsigned char **)&buffer, ((unsigned char *)buffer) + bufferlen, lenientConversion);
-	assert(result == conversionOK);
-	return DHSTR_makeString_((char *)buffer_before, ((char *)buffer) - buffer_before);
+	int32_t errors;
+	size_t new_len_in_bytes = utf32toutf8((uint32_t *)string, DHSTR_strlen(string) * sizeof(char32_t), (char *)buffer, bufferlen, &errors);
+	assert(errors == UTF8_ERR_NONE);
+	return DHSTR_makeString_((char *)buffer, new_len_in_bytes);
 }
 
 #define DHSTR_STRING_FROM_WCHART(allocator,string) DHSTR_makeString_(string,allocator(DHSTR_strlen(string)*4),DHSTR_strlen(string)*4)
@@ -501,28 +499,26 @@ DHSTR_String DHSTR_makeString_(wchar_t *string, void *buffer, int bufferlen)
 
 #define DHSTR_UTF16_FROM_STRING(string,alloc)(DHSTR_utf16FromString(string,alloc(string.length*4+sizeof(char16_t)),string.length*4+sizeof(char16_t)))
 //null terminated utf16 string
-char16_t *DHSTR_utf16FromString(DHSTR_String string,void *buffer, int bufferlen)
+char16_t *DHSTR_utf16FromString(DHSTR_String string, void *buffer, int bufferlen)
 {
-	char *buffer_before = (char *)buffer;
-	ConversionResult result = ConvertUTF8toUTF16((const unsigned char **)&string, (unsigned char *)(string.start+string.length), (char16_t**)&buffer, ((char16_t *)buffer) + bufferlen, lenientConversion);
-	assert(result == conversionOK);
-	int current_len = ((char *)buffer) - buffer_before;
-	assert(current_len < bufferlen);
-	((char16_t *)buffer_before)[current_len/sizeof(char16_t)] = 0;
-	return (char16_t *)buffer_before;
+	int32_t errors;
+	size_t new_len_in_bytes = utf8toutf16(string.start,string.length, (uint16_t *)buffer, bufferlen, &errors);
+	assert(errors == UTF8_ERR_NONE);
+	assert(new_len_in_bytes < bufferlen);
+	((char16_t *)buffer)[new_len_in_bytes / sizeof(char16_t)] = 0;
+	return (char16_t *)buffer;
 }
 
 #define DHSTR_UTF32_FROM_STRING(string,alloc)(DHSTR_utf32FromString(string,alloc(string.length*4+sizeof(char32_t)),string.length*4+sizeof(char32_t)))
 //null terminated utf16 string
 char32_t *DHSTR_utf32FromString(DHSTR_String string,void *buffer, int bufferlen)
 {
-	char *buffer_before = (char *)buffer;
-	ConversionResult result = ConvertUTF8toUTF32((const unsigned char **)&string, (unsigned char *)(string.start+string.length), (char32_t**)&buffer, ((char32_t *)buffer) + bufferlen, lenientConversion);
-	assert(result == conversionOK);
-	int current_len = ((char *)buffer) - buffer_before;
-	assert(current_len < bufferlen);
-	((char32_t *)buffer_before)[current_len/sizeof(char32_t)] = 0;
-	return (char32_t *)buffer_before;
+	int32_t errors;
+	size_t new_len_in_bytes = utf8toutf32(string.start, string.length, (uint32_t *)buffer, bufferlen, &errors);
+	assert(errors == UTF8_ERR_NONE);
+	assert(new_len_in_bytes < bufferlen);
+	((char32_t *)buffer)[new_len_in_bytes / sizeof(char32_t)] = 0;
+	return (char32_t *)buffer;
 }
 
 
@@ -534,7 +530,6 @@ wchar_t *DHSTR_wchar_tFromString(DHSTR_String string, void *buffer, int bufferle
 	assert(false && "wchar_t has a fucked up size");
 }
 
-#include "..\libs\ConvertUTF.c"
 
 
 #define DHSTR_UTF8_FROM_STRING(string,alloc)(DHSTR_utf8FromString(string,alloc(string.length+sizeof(char)),string.length+sizeof(char)))

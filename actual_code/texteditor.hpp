@@ -1,5 +1,11 @@
 
 #include "DH_MacroAbuse.h"
+
+#include "..\libs\utf8rewind-1.5.0\utf8rewind.h"
+#include "..\libs\utf8rewind-1.5.0\utf8rewind.c"
+#include "..\libs\utf8rewind-1.5.0\unicodedatabase.h"
+#include "..\libs\utf8rewind-1.5.0\unicodedatabase.c"
+
 #include "strings.c"
 
 

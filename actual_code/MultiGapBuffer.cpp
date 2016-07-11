@@ -174,11 +174,7 @@ bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it, int *wasCaret)
 }
 
 
-#include "..\libs\utf8rewind-1.5.0\utf8rewind.h"
-#include "..\libs\utf8rewind-1.5.0\utf8rewind.c"
-#include "..\libs\utf8rewind-1.5.0\unicodedatabase.h"
-#include "..\libs\utf8rewind-1.5.0\unicodedatabase.c"
-
+	
 int getNextCodePoint(MultiGapBuffer *buffer, MGB_Iterator *it, uint32_t *code_point)
 {
 	int max_read = buffer->blocks.start[it->block_index].length - it->sub_index;
