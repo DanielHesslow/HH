@@ -1,0 +1,3 @@
+
+Hello so lets se how this pans out!
+The open close thing is *not* reliable...Also the color changes do not check length properly...
