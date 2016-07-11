@@ -1373,7 +1373,7 @@ UTF8_API size_t utf8tolower(const char* input, size_t inputSize, char* target, s
 	because it is not a common text transformation. Titlecase uses uppercase
 	for the first letter of each word and lowercase for the rest. Words are
 	defined as "collections of code points with general category Lu, Ll, Lt, Lm
-	or Lo according to the Unicode database".
+	or Lo a§ording to the Unicode database".
 
 	Effectively, any type of punctuation can break up a word, even if this is
 	not grammatically valid. This happens because the titlecasing algorithm

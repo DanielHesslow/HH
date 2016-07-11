@@ -388,7 +388,7 @@ internal void		removeCharacter(TextBuffer *textBuffer, bool log = true);
 
 internal bool 		deleteCharacter(TextBuffer *textBuffer, int caretId,bool log = true);
 internal void 		unDeleteCharacter(TextBuffer *textBuffer, char character);
-internal int 		getCharacterWidth_std(char currentChar, char nextChar, Typeface::Font *allocationInfo, float scale);
+internal int 		getCharacterWidth_std(uint32_t currentChar, uint32_t nextChar, Typeface::Font *allocationInfo, float scale);
 internal int 		getCharacterWidth(MGB_Iterator iterator,TextBuffer *buffer, Typeface::Font *allocationInfo, float scale);
 //internal bool 		getNextCharacter(MultiGapBuffer *buffer, char **character);
 internal void		renderRect(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color);

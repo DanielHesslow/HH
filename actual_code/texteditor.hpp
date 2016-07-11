@@ -849,7 +849,7 @@ internal void setUpTT(stbtt_fontinfo *allocationInfo, char *font_path)
 	stbtt_InitFont(allocationInfo, fontBuffer, 0);
 }
 
-internal int getCharacterWidth_std(char currentChar, char nextChar, Typeface::Font *typeface, float scale)
+internal int getCharacterWidth_std(uint32_t currentChar, uint32_t nextChar, Typeface::Font *typeface, float scale)
 {
 	if (currentChar == VK_TAB)
 	{
@@ -914,13 +914,13 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 	}
 	{//utf16
 		utf16:
-		dprs("utf16");
 		growTo(buffer->backingBuffer->buffer, file_size * 4);
 		int32_t error;
 		size_t actual_size = utf16toutf8((const uint16_t *)file_start, file_size, mgb->start, mgb->length, &error);
 		switch (error)
 		{
 		case UTF8_ERR_NONE:
+			dprs("utf16");
 			buffer_size = actual_size;
 			goto cleanup;
 		case UTF8_ERR_INVALID_DATA:
@@ -936,7 +936,6 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 	
 	{//utf32
 		utf32:
-		dprs("utf32");
 
 		growTo(buffer->backingBuffer->buffer, file_size * 4);
 		int32_t error;
@@ -944,6 +943,7 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 		switch (error)
 		{
 		case UTF8_ERR_NONE:
+			dprs("utf32");
 			buffer_size = actual_size;
 			goto cleanup;
 		case UTF8_ERR_INVALID_DATA:
@@ -957,7 +957,6 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 		}
 	}
 
-	
 	cleanup:
 	buffer->backingBuffer->buffer->blocks.start[0].length = buffer_size;
 	buffer->backingBuffer->buffer->blocks.start[0].start = 0;
@@ -1792,37 +1791,6 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 }
 
 
-
-struct code_point_iterator
-{
-	char *cursor;
-};
-
-internal int renderCharacter(Bitmap bitmap, char *codePoint_start, int max_read, int x, int y, float scale,int color, Typeface::Font *Font)
-{
-	if (*codePoint_start == VK_TAB|| isVerticalTab(*codePoint_start)) return 0;
-	//uint8_t codepoint_read(const char* input, size_t inputSize, unicode_t* decoded);
-	//UTF8_API size_t utf8toutf32(const char* input, size_t inputSize, unicode_t* target, size_t targetSize, int32_t* errors);
-
-	uint32_t code_point;
-	int read = codepoint_read(codePoint_start, max_read, &code_point);
-	
-	if (read != 0)
-	{
-		int xOff, yOff;
-		CharBitmap charBitmap = getCharBitmap(code_point, scale, Font);
-		Bitmap output = { bitmap.memory, bitmap.width, bitmap.height, bitmap.stride, bitmap.bytesPerPixel };
-		blitChar(charBitmap, output, x, y, color);
-		return read;
-	}
-	else
-	{
-		assert(false && "codepoint could not be converted");
-		return 0;
-	}
-}
-
-
 struct CharRenderingInfo
 {
 	int color;
@@ -1832,46 +1800,62 @@ struct CharRenderingInfo
 	Typeface::Font *typeface;
 };
 
-internal int renderCharacter(Bitmap bitmap, char *codePoint_start, int max_read, CharRenderingInfo rendering)
+
+internal void renderCharacter(Bitmap bitmap, uint32_t code_point, int x, int y, float scale, int color, Typeface::Font *Font)
 {
-	return renderCharacter(bitmap, codePoint_start, max_read, rendering.x, rendering.y, rendering.scale, rendering.color, rendering.typeface);
+	if (code_point == VK_TAB || isVerticalTab(code_point)) return;
+
+	int xOff, yOff;
+	CharBitmap charBitmap = getCharBitmap(code_point, scale, Font);
+	Bitmap output = { bitmap.memory, bitmap.width, bitmap.height, bitmap.stride, bitmap.bytesPerPixel };
+	blitChar(charBitmap, output, x, y, color);
+}
+
+
+internal void renderCharacter(Bitmap bitmap, uint32_t code_point, CharRenderingInfo rendering)
+{
+	renderCharacter(bitmap, code_point, rendering.x, rendering.y, rendering.scale, rendering.color, rendering.typeface);
 }
 
 internal void renderCaret(Bitmap bitmap, int x, int y,float scale,Typeface::Font *typeface,int color)
 {
 	int width = getCharacterWidth_std('|', 'A', typeface, scale);
-	renderCharacter(bitmap, "|",1, x - width / 2, y,scale, color, typeface); //use ascent / descent probably.
+	
+	renderCharacter(bitmap, '|', x - width / 2, y,scale, color, typeface); //use ascent / descent probably.
 }
 
 
 //		----	LOGIC
 
-
-
-
-
-
 internal void renderText(Bitmap bitmap, char* string, float scale, int color, int x, int y, Typeface::Font *font)
 {
-	int len = DHSTR_strlen(string);
-	while (1)
+	int remaining_len = DHSTR_strlen(string);
+	uint32_t last_codepoint = 0;
+	while (*string)
 	{
-		len -= renderCharacter(bitmap, string, len, x, y, scale, color, font);
+		uint32_t codepoint;
+		remaining_len -= codepoint_read(string, remaining_len, &codepoint);
+		if(last_codepoint)
+			x += getCharacterWidth_std(last_codepoint,codepoint, font, scale);
+		renderCharacter(bitmap, codepoint, x, y, scale, color, font);
+		last_codepoint = codepoint;
 		++string;
-		if (!*string)break;
-		int width = getCharacterWidth_std(*(string - 1), *string, font, scale);
-		x += width;
 	}
 }
 
 internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int color, int x, int y, Typeface::Font *font)
 {
-	int len = string.length;
-	for(int i = 0; i < string.length;i++)
-	{//sooo wrong for unicode duuude. gotta fix me.
-		len-=renderCharacter(bitmap, &string.start[i],len, x, y, scale, color, font);
-		int width = getCharacterWidth_std(string.start[i], string.start[i+1], font, scale);
-		x += width;
+	uint32_t last_codepoint = 0;
+
+	for(int i = 0; i < string.length;)
+	{
+		uint32_t codepoint;
+		int read = codepoint_read(&string.start[i], string.length-i, &codepoint);
+		if(last_codepoint)
+			x+= getCharacterWidth_std(last_codepoint, codepoint, font, scale);
+		renderCharacter(bitmap, codepoint, x, y, scale, color, font);
+		last_codepoint = codepoint;
+		i += read;
 	}
 }
 
@@ -2123,6 +2107,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 	rendering.color = foregroundColor;
 	rendering.typeface = &textBuffer->typeface.Regular;
 
+	uint32_t last_codepoint=0;
 
 	if (ownsIndexOrOnSame(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it.block_index - 1))
 	{
@@ -2131,17 +2116,18 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 		textBuffer->caretX = 0;
 	}
 
+	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
+
 	bool selection = false;
 	if (length(textBuffer->backingBuffer->buffer))
 	{
 		while (!ended)
 		{
-			char *currentChar = getCharacter(textBuffer->backingBuffer->buffer, it);
+			uint32_t codepoint;
+			int read = getCodePoint(mgb, it, &codepoint);
+			ended = !MoveIterator(mgb, &it, read);
 
-			int caret;
-			ended = !getNext(textBuffer->backingBuffer->buffer, &it, &caret);
-
-			if (isLineBreak(*currentChar))
+			if (isLineBreak(codepoint))
 			{
 				currentLine++;
 				for (int i = 0; i < NumberOfLineChangeFuncs; i++)
@@ -2154,27 +2140,22 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			}
 			else
 			{
-				char nextChar = ended ? *getCharacter(textBuffer->backingBuffer->buffer, it) : 'A'; // some default to avoid derefing invalid memory
 				MGB_Iterator q = {};
 				q.block_index = it.block_index;
 				q.sub_index= it.sub_index;
 
 				getPrev(textBuffer->backingBuffer->buffer, &q);
-				int width = getCharacterWidth(q, textBuffer, rendering.typeface, rendering.scale);
-				//int width = getCharacterWidth_std(currentChar,nextChar, rendering.fontInfo, rendering.scale);
+				//int width = getCharacterWidth(q, textBuffer, rendering.typeface, rendering.scale);
+				int width = getCharacterWidth_std(last_codepoint, codepoint, rendering.typeface, rendering.scale);
 				if (selection)
 				{
 					renderRect(bitmap, (rendering.x+2)/3, rendering.y - rendering.typeface->ascent*rendering.scale, (width+2)/3, rendering.typeface->lineHeight*rendering.scale, highlightColor);
 				}
-				int read = renderCharacter(bitmap, currentChar, 4, rendering); 
-				for (int i = 0; i < read-1; i++)getNext(textBuffer->backingBuffer->buffer, &it, 0);
+				renderCharacter(bitmap, codepoint, rendering); 
 				rendering.x += width;
-				if (read != 1)
-				{
-					dpr(read);
-				}
 			}
-			
+			last_codepoint = codepoint;
+			/*
 			bool onCaret = ownsIndexOrOnSame(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, caret);
 			bool onSelection = ownsIndexOrOnSame(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, caret);
 			
@@ -2192,6 +2173,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 					textBuffer->caretX = (rendering.x - orgX);			
 				}
 			}
+			*/
 		}
 	}
 }

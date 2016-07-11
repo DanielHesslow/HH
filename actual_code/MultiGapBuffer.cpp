@@ -175,12 +175,24 @@ bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it, int *wasCaret)
 
 
 	
-int getNextCodePoint(MultiGapBuffer *buffer, MGB_Iterator *it, uint32_t *code_point)
+int getCodePoint(MultiGapBuffer *buffer, MGB_Iterator it, uint32_t *code_point)
 {
-	int max_read = buffer->blocks.start[it->block_index].length - it->sub_index;
-	int read = codepoint_read(getCharacter(buffer,*it), max_read, code_point);
-	for (int i = 0; i < read;i++) assert(getNext(buffer, it, 0));
+	int max_read = buffer->blocks.start[it.block_index].length - it.sub_index;
+	int read = codepoint_read(getCharacter(buffer,it), max_read, code_point);
 	return read;
+}
+
+bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
+{
+	for (int i = 0; i < direction; i++)
+	{
+		if (!getNext(buffer, it))return false;
+	}
+	for (int i = 0; i < -direction; i++) // minus direction y'all
+	{
+		if (!getPrev(buffer, it))return false;
+	}
+	return true;
 }
 
 bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it)
