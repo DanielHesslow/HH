@@ -321,6 +321,7 @@ struct TextBuffer
 	float lastWindowLineOffset;
 	int dx;
 	uint64_t lastAction;
+	int textBuffer_id;
 };
 
 bool ownsCaret(TextBuffer *buffer, int index)

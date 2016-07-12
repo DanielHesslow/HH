@@ -525,11 +525,11 @@ const char* utf8seek(const char* text, size_t textSize, const char* textStart, o
 			}
 			else if (offset > 0)
 			{
-				return seeking_forward(text, text_end, textSize, offset);
+				return seeking_forward(text, textSize, offset);
 			}
 			else
 			{
-				return seeking_rewind(textStart, text, textSize, offset);
+				return seeking_rewind(text, textSize, offset);
 			}
 
 		} break;
@@ -541,12 +541,12 @@ const char* utf8seek(const char* text, size_t textSize, const char* textStart, o
 				return text;
 			}
 
-			return seeking_forward(textStart, text_end, textSize, offset);
+			return seeking_forward(textStart, textSize, offset);
 
 		} break;
 
 	case SEEK_END:
-		return seeking_rewind(textStart, text_end, textSize, -offset);
+		return seeking_rewind(text_end, textSize, -offset);
 
 	default:
 		return text;

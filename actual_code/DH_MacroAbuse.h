@@ -3,6 +3,8 @@
 
 #define ARRAY_LENGTH(array) ((sizeof((array)))/(sizeof((array)[0])))
 
+#define DHMA_SWAP(type, a, b)do{type tmp = a; a = b; b = tmp;}while(0)
+
 
 #define DHMA_STRING(s) #s
 #define DHMA_STRING_(value) DHMA_STRING(value)

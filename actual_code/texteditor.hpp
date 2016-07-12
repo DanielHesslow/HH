@@ -543,7 +543,67 @@ internal bool remove(TextBuffer *textbuffer, bool log, Direction direction, int 
 
 // ---MOVE---
 
+internal int bytes_of_codepoint(int cursorId, MultiGapBuffer *mgb, Direction dir)
+{
+	if (dir == dir_left)
+	{
+		//plus one is for the assymetrical seek stuff. Brilliant. 
+		char *pos = get(mgb, cursorId, dir_left) + 1;
+		char *ret = (char *)seeking_rewind(pos, 8, -1);
+		return pos - ret;
+	}
+	else // dir_right
+	{
+		char *pos = get(mgb, cursorId, dir_right);
+		char *ret = (char *)seeking_forward(pos, 8, 1);
+		return  ret - pos;
+	}
+
+}
+
+internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direction dir)
+{
+	return bytes_of_codepoint(cursorId, mgb, dir);//tmp till I figure this stuff out.
+}
+
+enum MOVE_MODE
+{
+	byte,
+	codepoint,
+	grapheme_cluster,
+	word,
+	line,
+};
 //low level no cleanup basically a wrapper to the multigapbuffer
+internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, Location loc, int caretId, bool log)
+{
+	bool success = false;
+	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
+	if (dir == dir_left)
+	{
+		int diff = bytes_of_grapheme_cluster(caretId, mgb, dir_left);
+		for (int i = 0; i < diff; i++)
+			if (mgb_moveLeft(mgb, caretId))
+			{
+				if (log)
+					logMoved(&textBuffer->backingBuffer->history, dir, false, caretId, loc);
+				success = true;
+			}
+	}
+	else //dir_right
+	{
+		int diff = bytes_of_grapheme_cluster(caretId, mgb, dir_right);
+		for (int i = 0; i < diff; i++)
+			if (mgb_moveRight(mgb, caretId))
+			{
+				if (log)
+					logMoved(&textBuffer->backingBuffer->history, dir, false, caretId, loc);
+				success = true;
+			}
+	}
+	return success;
+}
+
 internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type)
 {
 	int caretId_i = textBuffer->ownedCarets_id.start[caretIdIndex];
@@ -557,46 +617,12 @@ internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex,
 	bool success=false;
 	if (type == move_caret_both || type == move_caret_insert)
 	{
-		if (dir == dir_left)
-		{
-			if (mgb_moveLeft(textBuffer->backingBuffer->buffer, caretId_i))
-			{
-				if(log)
-				logMoved(&textBuffer->backingBuffer->history, dir, false, caretIdIndex, loc_i);
-				success = true;
-			}
-		}
-		else //dir_right
-		{
-			if (mgb_moveRight(textBuffer->backingBuffer->buffer, caretId_i))
-			{
-				if(log)
-				logMoved(&textBuffer->backingBuffer->history, dir, false, caretIdIndex, loc_i);
-				success = true;
-			}
-		}
+		success |= move_llnc_(textBuffer, dir, loc_i,caretId_i, log);
 	}
 
 	if (type == move_caret_both || type == move_caret_selection)
 	{
-		if (dir == dir_left)
-		{
-			if (mgb_moveLeft(textBuffer->backingBuffer->buffer, caretId_s))
-			{
-				if(log)
-				logMoved(&textBuffer->backingBuffer->history, dir, true, caretIdIndex, loc_s);
-				success = true;
-			}
-		}
-		else //dir_right
-		{
-			if (mgb_moveRight(textBuffer->backingBuffer->buffer, caretId_s))
-			{
-				if(log)
-				logMoved(&textBuffer->backingBuffer->history, dir, true, caretIdIndex, loc_s);
-				success = true;
-			}
-		}
+		success |= move_llnc_(textBuffer, dir, loc_s,caretId_s, log);
 	}
 	return success;
 }
@@ -1207,6 +1233,7 @@ Typeface getTypeface(int index)
 	return loadedTypefaces.start[index].typeface;
 }
 
+global_variable int running_textBuffer_id = 200;
 internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLineInfoSize,int initialColorChangeSize, int initialHistoryEntrySize)
 {
 	//hold on are we not using the provided allocator???
@@ -1214,7 +1241,7 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	TextBuffer textBuffer = {};
 	textBuffer.allocator = allocator;
 	textBuffer.typeface = getTypeface(10);
-
+	textBuffer.textBuffer_id = running_textBuffer_id++;
 	textBuffer.bufferType = regularBuffer;
 	textBuffer.KeyBindings = DHDS_constructDA(KeyBinding,20, allocator);
 	textBuffer.ownedCarets_id = DHDS_constructDA(int,20, allocator);
@@ -1226,7 +1253,7 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 
 	//that it already is a caret here is implicit. I'm not loving it.
 	Add(&textBuffer.ownedCarets_id, textBuffer.backingBuffer->buffer->running_cursor_id-1);
-	int caret = AddCaret(textBuffer.backingBuffer->buffer, getCaretPos(textBuffer.backingBuffer->buffer, textBuffer.backingBuffer->buffer->running_cursor_id-1));
+	int caret = AddCaret(textBuffer.backingBuffer->buffer, textBuffer.textBuffer_id, 0);
 	Add(&textBuffer.ownedSelection_id, caret);
 	initLineSumTree(textBuffer.backingBuffer, allocator);
 	return textBuffer;
@@ -1235,9 +1262,10 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 
 void InsertCaret(TextBuffer *buffer, int pos, int index)  //for history reasons.
 {
-	int id_sel = AddCaret(buffer->backingBuffer->buffer, pos);
+	//WHAT
+	int id_sel = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
 	Insert(&buffer->ownedSelection_id, id_sel, index);
-	int id = AddCaret(buffer->backingBuffer->buffer, pos);
+	int id = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
 	Insert(&buffer->ownedCarets_id, id, index);
 	CursorInfo allocationInfo = {};
 	Insert(&buffer->cursorInfo, allocationInfo, index);
@@ -1245,9 +1273,9 @@ void InsertCaret(TextBuffer *buffer, int pos, int index)  //for history reasons.
 
 void AddCaret(TextBuffer *buffer, int pos)
 { 
-	int id_sel = AddCaret(buffer->backingBuffer->buffer, pos);
+	int id_sel = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
 	Add(&buffer->ownedSelection_id, id_sel);
-	int id = AddCaret(buffer->backingBuffer->buffer, pos);
+	int id = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
 	Add(&buffer->ownedCarets_id, id);
 	logAddCaret(&buffer->backingBuffer->history, pos, pos, buffer->ownedCarets_id.length-1, getLocationFromCaret(buffer, id));
 	CursorInfo allocationInfo = {};
@@ -1333,6 +1361,8 @@ internal TextBuffer openCommanLine()
 // return a pointer, null if failed?
 // now we're returning garbage... oh here's a pointer to free_d mem
 // do what you will... It's not very good at all..
+
+
 internal TextBuffer openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
 {
 	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
@@ -2094,7 +2124,8 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 	LineChangeHook *lineChangeFuncs=0, int NumberOfLineChangeFuncs=0)
 {
 	MGB_Iterator it = getIteratorAtLine(textBuffer, startLine);
-	
+	MGB_Iterator last_written_it = getIteratorAtLine(textBuffer, startLine);
+
 	textBuffer->caretX = -10;
 	int orgX = x;
 	bool ended = false;
@@ -2109,13 +2140,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 
 	uint32_t last_codepoint=0;
 
-	if (ownsIndexOrOnSame(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it.block_index - 1))
-	{
-		if (drawCaret)
-			renderCaret(bitmap, orgX, rendering.y, rendering.scale, rendering.typeface, caretColor);
-		textBuffer->caretX = 0;
-	}
-
+	
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 
 	bool selection = false;
@@ -2123,11 +2148,52 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 	{
 		while (!ended)
 		{
+			bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
+			bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
+
 			uint32_t codepoint;
 			int read = getCodePoint(mgb, it, &codepoint);
 			ended = !MoveIterator(mgb, &it, read);
+			
+			bool lineBreak= isLineBreak(codepoint);
 
-			if (isLineBreak(codepoint))
+
+			{
+				MGB_Iterator q = {};
+				q.block_index = it.block_index;
+				q.sub_index = it.sub_index;
+
+				getPrev(textBuffer->backingBuffer->buffer, &q);
+				//int width = getCharacterWidth(q, textBuffer, rendering.typeface, rendering.scale);
+				int width = 0;
+				if (last_codepoint != 0)
+					width = getCharacterWidth_std(last_codepoint, codepoint, rendering.typeface, rendering.scale);
+				if (selection)
+				{//lol we're effectively done in the next iteration.. :/
+					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.typeface->ascent*rendering.scale, (width + 2) / 3, rendering.typeface->lineHeight*rendering.scale, highlightColor);
+				}
+				rendering.x += width;
+
+				if(!lineBreak)
+					renderCharacter(bitmap, codepoint, rendering);
+			}
+			selection = onSelection ^ onCaret ^ selection;
+
+			
+			//oh yea! Think about this for a while...
+			//hint: if none of select and caret are here don't toggle selection
+			//		if both toggle selection twice (ie zero times)
+			//		otherwise toggle. 
+
+			if (onCaret)
+			{
+				if (drawCaret)
+					renderCaret(bitmap, rendering.x, rendering.y, rendering.scale, rendering.typeface, onCaret ? caretColor : caretColorDark);
+				textBuffer->caretX = (rendering.x - orgX);
+			}
+
+
+			if (lineBreak)
 			{
 				currentLine++;
 				for (int i = 0; i < NumberOfLineChangeFuncs; i++)
@@ -2137,43 +2203,10 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				if (rendering.y > bitmap.height) { break; }
 				rendering.y += rendering.typeface->lineHeight*rendering.scale;
 				rendering.x = orgX;
+				codepoint = 0;
 			}
-			else
-			{
-				MGB_Iterator q = {};
-				q.block_index = it.block_index;
-				q.sub_index= it.sub_index;
 
-				getPrev(textBuffer->backingBuffer->buffer, &q);
-				//int width = getCharacterWidth(q, textBuffer, rendering.typeface, rendering.scale);
-				int width = getCharacterWidth_std(last_codepoint, codepoint, rendering.typeface, rendering.scale);
-				if (selection)
-				{
-					renderRect(bitmap, (rendering.x+2)/3, rendering.y - rendering.typeface->ascent*rendering.scale, (width+2)/3, rendering.typeface->lineHeight*rendering.scale, highlightColor);
-				}
-				renderCharacter(bitmap, codepoint, rendering); 
-				rendering.x += width;
-			}
 			last_codepoint = codepoint;
-			/*
-			bool onCaret = ownsIndexOrOnSame(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, caret);
-			bool onSelection = ownsIndexOrOnSame(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, caret);
-			
-			if (caret != -1 )
-			{
-				if (onSelection != onCaret)
-				{
-					selection = !selection;
-				}
-				if (onCaret)
-				{
-
-					if (drawCaret)
-						renderCaret(bitmap, rendering.x, rendering.y, rendering.scale, rendering.typeface, onCaret ? caretColor : caretColorDark);
-					textBuffer->caretX = (rendering.x - orgX);			
-				}
-			}
-			*/
 		}
 	}
 }
@@ -2849,7 +2882,15 @@ internal void updateInput(Data *data, Input *input,Bitmap bitmap, uint64_t lastA
 			else
 			{
 				if (!iswcntrl(input->character))
-					appendCharacter(textBuffer, input->character);
+				{
+					char buffer[4];
+					int32_t errors;
+					int read = utf16toutf8(&input->VK_Code, sizeof(char16_t), buffer, 4 * sizeof(char), &errors);
+					if (!errors)
+						for (int i = 0; i < read; i++) appendCharacter(textBuffer, buffer[i]);
+					else
+						assert(false && "could not convert keyboard input to utf8");
+				}
 			}
 
 		}

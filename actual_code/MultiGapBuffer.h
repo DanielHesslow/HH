@@ -5,12 +5,6 @@ struct MGB_Iterator
 {
 	int block_index;
 	int sub_index;
-
-	bool operator==(const MGB_Iterator& other)
-	{
-		return (other.block_index == block_index) && (other.sub_index == sub_index);
-	}
-
 };
 
 struct  BufferBlock
@@ -21,13 +15,21 @@ struct  BufferBlock
 
 DEFINE_DynamicArray(BufferBlock);
 
+struct CursorIdentifier
+{
+	int textBuffer_index;
+	int id;
+};
+DEFINE_DynamicArray(CursorIdentifier);
+
+
 struct MultiGapBuffer
 {
 	char *start;
 	DynamicArray_BufferBlock blocks;
 	int length;
 	int running_cursor_id;
-	DynamicArray_int cursor_ids;
+	DynamicArray_CursorIdentifier cursor_ids;
 };
 
 internal char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it);
@@ -46,7 +48,7 @@ internal bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it);
 internal int indexFromId(MultiGapBuffer *buffer, int id);
 internal MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id);
 internal void getSurroundingGap(MultiGapBuffer *buffer, int index, int *prevGap, int *nextGap);
-internal int AddCaret(MultiGapBuffer *buffer, int i);
+internal int AddCaret(MultiGapBuffer *buffer,int textBuffer_index, int i);
 internal bool del(MultiGapBuffer *buffer, int caretId);
 internal int posFromId(MultiGapBuffer *buffer, int caretId);
 internal void removeCaret(MultiGapBuffer *buffer, int caretId);
@@ -54,7 +56,7 @@ internal void removeEmpty(TextBuffer *textBuffer);
 internal bool mgb_moveLeft(MultiGapBuffer *buffer, int caretId);
 internal bool mgb_moveRight(MultiGapBuffer *buffer, int caretId);
 internal bool ownsIndex(MultiGapBuffer *buffer, DynamicArray_int *ids, int targetIndex);
-internal bool ownsIndexOrOnSame(MultiGapBuffer*buffer, DynamicArray_int *ids, int targetIndex);
+internal bool HasCaretAtIterator(MultiGapBuffer*buffer, DynamicArray_int *ids, MGB_Iterator	 iterator);
 internal bool isEmptyCaret(MultiGapBuffer *buffer, DynamicArray_int *ids, int index);
 internal bool removeCharacter(MultiGapBuffer *buffer, int caretId);
 internal void invDelete(MultiGapBuffer *buffer, int caretId, char character);
