@@ -316,12 +316,15 @@ static void GetOutlineMetrics(HDC hdc)
 	GlobalFree(buffer);
 }
 
+
 void loadFonts() 
 {
-	static ORD_DynamicArray_AvailableFont availableFonts = DHDS_ORD_constructDA(AvailableFont, 500, default_allocator);
 	static const LPCSTR fontRegistryPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
 	HKEY hKey;
 	LONG result;
+
+
+	DH_Allocator macro_used_allocator = default_allocator;
 
 	result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, fontRegistryPath, 0, KEY_READ, &hKey);
 	if (result != ERROR_SUCCESS) {
@@ -342,8 +345,8 @@ void loadFonts()
 
 	char winDir[MAX_PATH]; //the maxpath isn't really maxpath anymore but I'm fairly confident that the windows file is inside of maxdir though...
 	GetWindowsDirectory(winDir, MAX_PATH);
-	char *system_fonts_file = mergeStrings(winDir, "\\FONTS\\");
-
+	DHSTR_String system_fonts_file = DHSTR_MERGE(DHSTR_MAKE_STRING(winDir), DHSTR_MAKE_STRING("\\FONTS\\"),alloca);
+	//load the font
 	do {
 		wsFontFile = "";
 		valueDataSize = maxValueDataSize;
@@ -362,24 +365,28 @@ void loadFonts()
 		trimEnd(valueName, "regular ");
 
 		AvailableFont typeface = {};
-		typeface.name = strcpy(valueName);
-		typeface.path = mergeStrings(system_fonts_file, valueData);
+		typeface.name = DHSTR_MAKE_STRING(valueName);
+		typeface.path = DHSTR_MERGE(system_fonts_file, DHSTR_MAKE_STRING(valueData),ALLOCATE);
 		
 		if ((valueData[1] == ':') && false)
-			typeface.path = strcpy(valueData);
+		{
+			typeface.path = DHSTR_CPY(DHSTR_MAKE_STRING(valueData), ALLOCATE);
+		}
 		else
-			typeface.path = mergeStrings(system_fonts_file, valueData);
+		{
+			typeface.path = DHSTR_MERGE(system_fonts_file, DHSTR_MAKE_STRING(valueData),ALLOCATE);
+		}
 
 		Insert(&availableFonts, typeface, ordered_insert_dont_care);
 	} while (result != ERROR_NO_MORE_ITEMS);
-	free_(system_fonts_file);
 	RegCloseKey(hKey);
 
+	//merge fonts into typefaces
 	int base=0;
 	int c=1;
 	for (int i = 1; i < availableFonts.length; i++)
 	{
-		if (DH_strcmp_init(availableFonts.start[base].name, availableFonts.start[i].name)) //this is a bit wrong, it groups some stuff it shouldn't... (but so does the win32 api) ie. Arial Unicode MS is a style, whatever
+		if (!DHSTR_eq(availableFonts.start[base].name, availableFonts.start[i].name,string_eq_length_dont_care)) //this is a bit wrong, it groups some stuff it shouldn't... (but so does the win32 api) ie. Arial Unicode MS is a style, whatever
 		{
 			++c;
 		}
@@ -388,19 +395,16 @@ void loadFonts()
 			AvailableTypeface typeface = {};
 			typeface.member_len = c;
 			typeface.members = (AvailableFont *)alloc_(sizeof(AvailableFont)* c,"typeface members");
-			typeface.typefaceName = availableFonts.start[base].name;
+			typeface.typefaceName = DHSTR_UTF8_FROM_STRING(availableFonts.start[base].name,ALLOCATE);
 			int len = strlen(typeface.typefaceName);
 			
 			for (int j = 0; j < c; j++)
 			{
 				typeface.members[j] = availableFonts.start[base + j];
-				typeface.members[j].name = typeface.members[j].name + len;
-				char *p = typeface.members[j].name;
-				while (*++p);
-				while (*--p == ' ');
-				*++p = 0;
+				DHSTR_String memberName = typeface.members[base + j].name;
+				typeface.members[j].name = DHSTR_subString(memberName, 0, memberName.length-1);
 			}
-			typeface.members[0].name = "Regular";
+			typeface.members[0].name = DHSTR_MAKE_STRING("Regular");
 			Add(&availableTypefaces, typeface);
 			c = 1;
 			base = i;

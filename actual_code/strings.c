@@ -510,7 +510,7 @@ char16_t *DHSTR_utf16FromString(DHSTR_String string, void *buffer, int bufferlen
 }
 
 #define DHSTR_UTF32_FROM_STRING(string,alloc)(DHSTR_utf32FromString(string,alloc(string.length*4+sizeof(char32_t)),string.length*4+sizeof(char32_t)))
-//null terminated utf16 string
+//null terminated utf32 string
 char32_t *DHSTR_utf32FromString(DHSTR_String string,void *buffer, int bufferlen)
 {
 	int32_t errors;

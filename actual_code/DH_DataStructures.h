@@ -319,6 +319,16 @@ struct HashTable_##key_type##_##value_type\
 	void *allocationInfo;\
 };\
 \
+int HT_count(HashTable_##key_type##_##value_type *hashtable)\
+{\
+	int c = 0;\
+	for (int i = 0; i < hashtable->capacity; i++)\
+	{\
+		if (hashtable->buckets[i].state == bucket_state_occupied) ++c;\
+	}\
+	return c;\
+}\
+\
 HashTable_##key_type##_##value_type construct_HashTable_##key_type##_##value_type(int capacity, void *allocationInfo, DH_Allocator allocator)\
 {\
 	HashTable_##key_type##_##value_type new_hashtable = {};\
@@ -327,6 +337,7 @@ HashTable_##key_type##_##value_type construct_HashTable_##key_type##_##value_typ
 	for(int i = 0; i<capacity;i++) new_hashtable.buckets[i].state = bucket_state_empty;\
 	new_hashtable.capacity = capacity;\
 	new_hashtable.allocationInfo = allocationInfo;\
+	assert(HT_count(&new_hashtable) == new_hashtable.length && "create");\
 	return new_hashtable;\
 }\
 \
@@ -334,6 +345,7 @@ void _maybe_grow(HashTable_##key_type##_##value_type *hashtable);\
 \
 value_type *insert(HashTable_##key_type##_##value_type *hashtable, key_type key, value_type value)\
 {\
+	assert(HT_count(hashtable) == hashtable->length && "insert early");\
 	_maybe_grow(hashtable);\
 	unsigned int index = ((unsigned int)hash_function(key)) % hashtable->capacity;\
 	int inital_index = index;\
@@ -353,11 +365,13 @@ value_type *insert(HashTable_##key_type##_##value_type *hashtable, key_type key,
 	bucket.value = value;\
 	hashtable->buckets[index] = bucket;\
 	++hashtable->length;\
+	assert(HT_count(hashtable) == hashtable->length && "insert late");\
 	return &hashtable->buckets[index].value;\
 }\
 \
 void _maybe_grow(HashTable_##key_type##_##value_type *hashtable)\
 {\
+	assert(HT_count(hashtable) == hashtable->length && "maybe_grow early");\
 	float new_load_factor =((float)hashtable->length + 1) / ((float)hashtable->capacity);\
 	if ( new_load_factor > HT_OPTIMAL_LOAD_FACTOR)\
 	{\
@@ -375,10 +389,12 @@ void _maybe_grow(HashTable_##key_type##_##value_type *hashtable)\
 		assert(prev_len == new_hashtable.length);\
 		*hashtable = new_hashtable;\
 	}\
+	assert(HT_count(hashtable) == hashtable->length && "maybe_grow late");\
 }\
 \
 HashBucket_##key_type##_##value_type *lookup_bucket(HashTable_##key_type##_##value_type *hashtable, key_type key, bool *success)\
 {\
+	assert(HT_count(hashtable) == hashtable->length && "lookup early");\
 	int index = ((unsigned int) hash_function(key)) % hashtable->capacity;\
 	for(int i = 0; i< hashtable->capacity; i++)\
 	{\
@@ -399,6 +415,7 @@ HashBucket_##key_type##_##value_type *lookup_bucket(HashTable_##key_type##_##val
 	}\
 	if(success)\
 		*success = false;\
+	assert(HT_count(hashtable) == hashtable->length && "lookup late");\
 	return (HashBucket_##key_type##_##value_type *)0;\
 }\
 bool lookup(HashTable_##key_type##_##value_type *hashtable, key_type key, value_type ** _out_res)\
@@ -410,7 +427,6 @@ bool lookup(HashTable_##key_type##_##value_type *hashtable, key_type key, value_
 	}\
 	return success;\
 }\
-\
 \
 void remove(HashTable_##key_type##_##value_type *hashtable, key_type key, bool *success)\
 {\
@@ -425,6 +441,7 @@ void remove(HashTable_##key_type##_##value_type *hashtable, key_type key, bool *
 }\
 void clear(HashTable_##key_type##_##value_type *hashtable)\
 {\
+	assert(HT_count(hashtable) == hashtable->length && "clear early");\
 	HashBucket_##key_type##_##value_type empty_bucket;\
 	empty_bucket.state = bucket_state_empty;\
 \
@@ -432,6 +449,7 @@ void clear(HashTable_##key_type##_##value_type *hashtable)\
 	{\
 		hashtable->buckets[i] = empty_bucket;\
 	}\
+	assert(HT_count(hashtable) == hashtable->length && "clear late");\
 	hashtable->length = 0;\
 }
 // if we have a rather big array and want to have some data on a small amount of those elements

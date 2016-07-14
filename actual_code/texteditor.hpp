@@ -72,7 +72,7 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 		}
 		else
 		{
-			x_ack += getCharacterWidth(it, textBuffer, &textBuffer->typeface.Regular, scaleFromLine(textBuffer, getLineFromIterator(textBuffer, it)));
+			x_ack += getCharacterWidth(it, textBuffer, textBuffer->font, scaleFromLine(textBuffer, getLineFromIterator(textBuffer, it)));
 			prev = c;
 		}
 	}
@@ -143,7 +143,7 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 	{
 		MGB_Iterator it = getIteratorFromCaret(textBuffer->backingBuffer->buffer, caretId);
 		getPrev(textBuffer->backingBuffer->buffer, &it);
-		dx = getCharacterWidth(it, textBuffer, &textBuffer->typeface.Regular, scale);
+		dx = getCharacterWidth(it, textBuffer, textBuffer->font, scale);
 
 		if (abs(x - targetX) < abs((x + dx) - targetX) || isLineBreak(*get(textBuffer->backingBuffer->buffer, caretId, dir_left)))
 		{
@@ -224,7 +224,7 @@ internal float scaleFromLine(TextBuffer *textBuffer, int line)
 {
 	if (scale == -1)
 	{
-		scale = stbtt_ScaleForPixelHeight(textBuffer->typeface.Regular.font_info, 14);
+		scale = stbtt_ScaleForPixelHeight(textBuffer->font->font_info, 14);
 	}
 	return scale;
 }
@@ -549,13 +549,13 @@ internal int bytes_of_codepoint(int cursorId, MultiGapBuffer *mgb, Direction dir
 	{
 		//plus one is for the assymetrical seek stuff. Brilliant. 
 		char *pos = get(mgb, cursorId, dir_left) + 1;
-		char *ret = (char *)seeking_rewind(pos, 8, -1);
+		char *ret = (char *)seeking_rewind(pos, 1000, -1);
 		return pos - ret;
 	}
 	else // dir_right
 	{
 		char *pos = get(mgb, cursorId, dir_right);
-		char *ret = (char *)seeking_forward(pos, 8, 1);
+		char *ret = (char *)seeking_forward(pos, 1000, 1);
 		return  ret - pos;
 	}
 
@@ -1068,24 +1068,25 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 }
 
 DEFINE_HashTable(int, PVOID, silly_hash,int_eq);
-global_variable HashTable_int_PVOID open_files = DHDS_constructHT(int, PVOID,50,default_allocator);
+global_variable HashTable_int_PVOID open_files = DHDS_constructHT(int, PVOID,128,default_allocator);
 internal bool get_backingBuffer(char *file_name) 
 {
 	
 }
 
-Typeface::Font LoadFont(char *path)
+Typeface::Font LoadFont(DHSTR_String path)
 {
 	Typeface::Font ret = {};
-	ret.cachedBitmaps = DHDS_constructHT(lli, CharBitmap, 300, default_allocator);
-	ret.cachedGlyphs = DHDS_constructHT(char, int, 300, default_allocator);
+	ret.cachedBitmaps = DHDS_constructHT(ulli, CharBitmap, 256, default_allocator);
+	ret.cachedGlyphs = DHDS_constructHT(char, int, 256, default_allocator);
 	ret.font_info = (stbtt_fontinfo *)Allocate(default_allocator, sizeof(stbtt_fontinfo), "fontinfo_info");
 	ret.font_info->userdata = "stbtt internal allocation";
-	setUpTT(ret.font_info,path);
+	setUpTT(ret.font_info,DHSTR_UTF8_FROM_STRING(path,alloca));
 	stbtt_GetFontVMetrics(ret.font_info, &ret.ascent, &ret.descent, &ret.lineGap);
 	ret.lineHeight = (ret.ascent - ret.descent + ret.lineGap);
 	return ret;
 }
+
 
 
 
@@ -1145,37 +1146,37 @@ Typeface LoadTypeface(int index)
 	AvailableTypeface avail = availableTypefaces.start[index];
 	for (int i = 0; i < avail.member_len; i++)
 	{
-		if (!strcmp(avail.members[i].name, "Regular"))
+		if (DHSTR_eq(avail.members[i].name, DHSTR_MAKE_STRING("Regular"),string_eq_length_dont_care))
 		{
 			ret.Regular = LoadFont(avail.members[i].path);
 			continue;
 		}
-		if (!strcmp(avail.members[i].name, "Italic"))
+		if (DHSTR_eq(avail.members[i].name, DHSTR_MAKE_STRING("Italic"), string_eq_length_dont_care))
 		{
 			ret.Italic = LoadFont(avail.members[i].path);
 			continue;
 		}
-		if (!strcmp(avail.members[i].name, "Bold"))
+		if (DHSTR_eq(avail.members[i].name, DHSTR_MAKE_STRING("Bold"), string_eq_length_dont_care))
 		{
 			ret.Bold = LoadFont(avail.members[i].path);
 			continue;
 		}
-		if (!strcmp(avail.members[i].name, "Bold Italic")|| !strcmp(avail.members[i].name, "Italic Bold"))
+		if (DHSTR_eq(avail.members[i].name, DHSTR_MAKE_STRING("Bold Italic"), string_eq_length_dont_care))
 		{
 			ret.BoldItalic = LoadFont(avail.members[i].path);
 			continue;
 		}
-		if (!strcmp(avail.members[i].name, "Demi Light") || !strcmp(avail.members[i].name, "Semi Light"))
+		if (DHSTR_eq(avail.members[i].name, DHSTR_MAKE_STRING("Demi Light"), string_eq_length_dont_care))
 		{
 			ret.DemiLight = LoadFont(avail.members[i].path);
 			continue;
 		}
-		if (!strcmp(avail.members[i].name, "Demi Bold") || !strcmp(avail.members[i].name, "Semi Bold"))
+		if (DHSTR_eq(avail.members[i].name, DHSTR_MAKE_STRING("Demi Bold"), string_eq_length_dont_care))
 		{
 			ret.Bold = LoadFont(avail.members[i].path);
 			continue;
 		}
-		dprs(avail.members[i].name);
+		dprs(DHSTR_UTF8_FROM_STRING(avail.members[i].name,alloca));
 	}
 	ret.Regular = LoadFont(avail.members[10].path);
 
@@ -1205,32 +1206,87 @@ Typeface LoadTypeface(int index)
 
 	return ret;
 }
+/*
 struct MaybeTypeface
 {
 	bool exist;
 	Typeface typeface;
 };
 DEFINE_DynamicArray(MaybeTypeface);
-DynamicArray_MaybeTypeface loadedTypefaces = {};
+MaybeTypeface *loadedTypefaces = (MaybeTypeface *)0;
+
 
 Typeface getTypeface(int index)
 {
-	if (!loadedTypefaces.start)
+	if (!loadedTypefaces)
 	{
-		loadedTypefaces = DHDS_constructDA(MaybeTypeface, availableTypefaces.length, default_allocator);
-		/*
-		for (int i = 0; i < availableTypefaces.length; i++)
+		loadedTypefaces = (MaybeTypeface *)Allocate(platform_allocator, availableTypefaces.length*sizeof(MaybeTypeface),"loaded typeface");
+	}
+	if (!loadedTypefaces[index].exist)
+	{
+		loadedTypefaces[index].typeface = LoadTypeface(index);
+		loadedTypefaces[index].exist = true;
+	}
+	return loadedTypefaces[index].typeface;
+}
+*/
+
+struct MaybeFont
+{
+	bool exist;
+	Typeface::Font font;
+};
+
+MaybeFont *loadedFonts = (MaybeFont *)0;
+Typeface::Font *getFont(int index)
+{
+	if (!loadedFonts)
+	{
+		loadedFonts = (MaybeFont *)Allocate(platform_allocator, availableFonts.length*sizeof(MaybeFont), "loaded font");
+	}
+	if (!loadedFonts[index].exist)
+	{
+		loadedFonts[index].font= LoadFont(availableFonts.start[index].path);
+		loadedFonts[index].exist = true;
+	}
+	return &loadedFonts[index].font;
+}
+Typeface::Font *getFont(DHSTR_String name)
+{
+	bool *rem = (bool *)alloca(availableFonts.length);
+	memset(rem, true, availableFonts.length);
+	int rem_len = availableFonts.length;
+	for (int s = 0; s < name.length; s++)
+	{
+		for (int i = 0; i < availableFonts.length; i++)
 		{
-			LoadTypeface(i);
+			if (!rem[i])continue;
+			//heh.. I'm so sorry for the indexing. FIX ME.
+			if (availableFonts.start[i].name.start[s] != name.start[s])
+			{
+				if (rem_len == 1)
+				{
+					dprs("could not load desired font, loaded:");
+					dprs(availableFonts.start[i].name.start);
+					return getFont(i);
+				}
+				else {
+					rem[i] = false;
+					--rem_len;
+				}
+			}
 		}
-		*/
 	}
-	if (!loadedTypefaces.start[index].exist)
-	{
-		loadedTypefaces.start[index].typeface = LoadTypeface(index);
-		loadedTypefaces.start[index].exist = true;
+	for (int i = 0; i < availableFonts.length; i++)	{
+	
+		if (rem[i])
+		{
+			dprs("loaded font: ");
+			dprs(DHSTR_UTF8_FROM_STRING(availableFonts.start[i].name,alloca));
+			return getFont(i);
+		}
 	}
-	return loadedTypefaces.start[index].typeface;
+
 }
 
 global_variable int running_textBuffer_id = 200;
@@ -1240,7 +1296,7 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	DH_Allocator allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "textBuffer arena"));
 	TextBuffer textBuffer = {};
 	textBuffer.allocator = allocator;
-	textBuffer.typeface = getTypeface(10);
+	textBuffer.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
 	textBuffer.textBuffer_id = running_textBuffer_id++;
 	textBuffer.bufferType = regularBuffer;
 	textBuffer.KeyBindings = DHDS_constructDA(KeyBinding,20, allocator);
@@ -1495,7 +1551,7 @@ internal Bitmap getVerticalBitmapNumber(Bitmap bitmap, int bitmaps, int index)
 
 internal void fillBitmap(TextBuffer *textBuffer, Bitmap bitmap, int lineOffset,int y)
 {
-	Typeface::Font tmp_font_to_make_things_work = textBuffer->typeface.Regular;
+	Typeface::Font tmp_font_to_make_things_work = *textBuffer->font;
 	if (y > 0)
 	{
 		float scale = scaleFromLine(textBuffer, lineOffset);
@@ -1744,7 +1800,7 @@ internal inline int floor_to_multiple_of(int i, int mult)
 	return (i / mult)*mult;
 }
 
-long long int charBitmapIdentifier(float scale, int codepoint)
+long long unsigned int charBitmapIdentifier(float scale, int codepoint)
 {
 	long long int int_scale = ((long long int)(scale * (1 << 16))) << 32;
 	return codepoint | int_scale;
@@ -1755,7 +1811,7 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 	stbtt_fontinfo *font_info = font->font_info;
 	int xOff, yOff;
 	bool found = false;
-	long long int ident = charBitmapIdentifier(scale,codepoint);
+	long long unsigned int ident = charBitmapIdentifier(scale,codepoint);
 	CharBitmap *lookedup;
 	if(lookup(&font->cachedBitmaps, ident, &lookedup)) 
 	{
@@ -1768,8 +1824,6 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 	float die_off = 1.2; // [1.5,2]
 	float intensity = 1;
 	float subpix_bleed[] = { .5f * intensity / 3, .5f *die_off *intensity / 3 , .5f *intensity/ (3 * die_off)};
-
-
 
 	int bleed_extra_per_row = ciel_divide((ARRAY_LENGTH(subpix_bleed) - 1) * 2, 3);
 	int color_stride = (ciel_divide(width+2, 3) + bleed_extra_per_row)+1;
@@ -2136,7 +2190,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 	rendering.y = y;
 	rendering.scale = scaleFromLine(textBuffer, currentLine);
 	rendering.color = foregroundColor;
-	rendering.typeface = &textBuffer->typeface.Regular;
+	rendering.typeface = textBuffer->font;
 
 	uint32_t last_codepoint=0;
 
@@ -2265,7 +2319,7 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 internal void renderCommandLine(Bitmap bitmap, Data data)
 {
 	TextBuffer *buffer = data.commandLine;
-	int LH = buffer->typeface.Regular.lineHeight* scaleFromLine(buffer, 0);
+	int LH = buffer->font->lineHeight* scaleFromLine(buffer, 0);
 	int padding = 2;
 	int minWidth = 400;
 	int width = bitmap.width / 2;
@@ -2276,7 +2330,7 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 	Rect r = { x,y,width,height};
 	renderRect(bitmap,r, backgroundColors[2]);
 
-	int dec = buffer->typeface.Regular.descent * scaleFromLine(buffer, 0);
+	int dec = buffer->font->descent* scaleFromLine(buffer, 0);
 
 	if (data.menu.length > 0)
 	{
@@ -2294,7 +2348,7 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 			{
 				clearBitmap(b, backgroundColors[2]);
 			}
-			renderText(b,data.menu.start[i].name,scaleFromLine(buffer,0),foregroundColor,0,height-3,&buffer->typeface.Regular); // the one here is a bit worrying... 
+			renderText(b,data.menu.start[i].name,scaleFromLine(buffer,0),foregroundColor,0,height-3,buffer->font); // the one here is a bit worrying... 
 		}
 	}
 	renderText(buffer, subBitmap(bitmap, r), 0, 0, height + dec, true);
@@ -2303,7 +2357,7 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 
 internal int calculateVisibleLines(TextBuffer *textBuffer, Bitmap bitmap, int line)
 {
-	Typeface::Font tmp_font_and_stuff = textBuffer->typeface.Regular;
+	Typeface::Font tmp_font_and_stuff = *textBuffer->font;
 	int y = 0;
 	int counter = 0;
 	while (y < bitmap.height)
@@ -2354,9 +2408,9 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	
 	//float offset = ((int)textBuffer->lastWindowLineOffset) - textBuffer->lastWindowLineOffset;
 	float offset = 0;
-	fillBitmap(textBuffer, bitmap, textBuffer->lastWindowLineOffset, y - textBuffer->typeface.Regular.descent * firstScale + (textBuffer->typeface.Regular.lineHeight*firstScale)*(offset));
+	fillBitmap(textBuffer, bitmap, textBuffer->lastWindowLineOffset, y - textBuffer->font->descent * firstScale + (textBuffer->font->lineHeight*firstScale)*(offset));
 	LineChangeHook lch[] = { bigTitles };
-	renderText(textBuffer, margin(bitmap,x,x,y,y), textBuffer->lastWindowLineOffset, textBuffer->dx, y + (textBuffer->typeface.Regular.lineHeight*firstScale)*(1+offset), drawCaret, lch, ARRAY_LENGTH(lch));
+	renderText(textBuffer, margin(bitmap,x,x,y,y), textBuffer->lastWindowLineOffset, textBuffer->dx, y + (textBuffer->font->lineHeight*firstScale)*(1+offset), drawCaret, lch, ARRAY_LENGTH(lch));
 }
 
 internal void clearBuffer(MultiGapBuffer *buffer)
@@ -2568,7 +2622,7 @@ internal int getRenderedHeightNode(void *node)
 	return 50;
 }
 
-internal int getRenderedWidth(void *node, NodeInterface nodeInterface,void *data)
+internal int getRenderedWidth(void *node, NodeInterface nodeInterface, void *data)
 {
 	int PADDING = 0;
 	int ack = 0;
@@ -2582,7 +2636,7 @@ internal int getRenderedWidth(void *node, NodeInterface nodeInterface,void *data
 }
 
 
-internal void renderNodeCentered(Bitmap bitmap, void *node, int offX, int offY, NodeInterface nodeInterface, Typeface *typeface, void *data)
+internal void renderNodeCentered(Bitmap bitmap, void *node, int offX, int offY, NodeInterface nodeInterface, Typeface::Font *font, void *data)
 {
 	int width = getRenderedWidthNode(node)-1;
 	int height = getRenderedHeightNode(node)-1;
@@ -2592,14 +2646,13 @@ internal void renderNodeCentered(Bitmap bitmap, void *node, int offX, int offY, 
 	const int buffer_len = 40;
 	char buffer[buffer_len];
 	nodeInterface.getName(data, node, buffer, buffer_len);
-	renderText(b, buffer, 0.012, foregroundColor, 2, 15, &typeface->Bold);
+	renderText(b, buffer, 0.012, foregroundColor, 2, 15, font );
 
 	nodeInterface.getText(data, node, buffer, buffer_len);
-	renderText(b, buffer, 0.008, foregroundColor, 2, 30, &typeface->Bold);
-	
+	renderText(b, buffer, 0.008, foregroundColor, 2, 30, font);
 }
 
-internal void renderTree(Bitmap bitmap, void *node, int offX, int offY, Typeface *typeface, NodeInterface nodeInterface, void *data_passed_to_interface_funcs)
+internal void renderTree(Bitmap bitmap, void *node, int offX, int offY, Typeface::Font *typeface, NodeInterface nodeInterface, void *data_passed_to_interface_funcs)
 {
 	renderNodeCentered(bitmap, node, offX, offY, nodeInterface, typeface, data_passed_to_interface_funcs);
 	int width = getRenderedWidth(node,nodeInterface, data_passed_to_interface_funcs);
@@ -2618,7 +2671,7 @@ internal void renderTree(Bitmap bitmap, void *node, int offX, int offY, Typeface
 
 internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool isActive, bool drawCaret)
 {//@improve me... this api is not ok.
-	if (!buffer->typeface.Regular.font_info)
+	if (!buffer->font->font_info)
 	{
 		assert(false && "font was not loaded correctly");
 		return;
@@ -2627,8 +2680,8 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 	{
 		//if(colorIsDirty)
 		//parseForCC(buffer); 
-		float infoScale = stbtt_ScaleForPixelHeight(buffer->typeface.Regular.font_info, 20);
-		int infoSpace = buffer->typeface.Regular.lineHeight*infoScale;
+		float infoScale = stbtt_ScaleForPixelHeight(buffer->font->font_info, 20);
+		int infoSpace = buffer->font->lineHeight*infoScale;
 	
 		int padding = 0;
 
@@ -2725,7 +2778,7 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 			return false;
 		};
 
-		renderTree(bitmap, &buffer->backingBuffer->history.entries.start[0], bitmap.width / 2, 0, &buffer->typeface, nodeInterface, &buffer->backingBuffer->history);
+		renderTree(bitmap, &buffer->backingBuffer->history.entries.start[0], bitmap.width / 2, 0, buffer->font, nodeInterface, &buffer->backingBuffer->history);
 	}
 	else
 	{

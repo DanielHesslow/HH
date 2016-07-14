@@ -262,8 +262,8 @@ int char_eq(char a, char b)
 {
 	return a == b;
 }
-typedef long long int lli;
-internal inline bool lli_eq(lli a, lli b)
+typedef long long unsigned int ulli;
+internal inline bool lli_eq(ulli a, ulli b)
 {
 	return a == b;
 }
@@ -271,7 +271,7 @@ internal inline bool int_eq(int a, int b)
 {
 	return a == b;
 }
-DEFINE_HashTable(lli, CharBitmap, silly_hash_lli, lli_eq);
+DEFINE_HashTable(ulli, CharBitmap, silly_hash_lli, lli_eq);
 DEFINE_HashTable(char, int, sillyhash_char, char_eq);
 
 struct Typeface
@@ -279,7 +279,7 @@ struct Typeface
 	struct Font
 	{
 		stbtt_fontinfo *font_info;
-		HashTable_lli_CharBitmap cachedBitmaps;
+		HashTable_ulli_CharBitmap cachedBitmaps;
 		HashTable_char_int cachedGlyphs;
 		int ascent, descent, lineHeight, lineGap;
 	}Light, DemiLight, Regular, DemiBold, Bold, Black, Italic, BoldItalic;// use
@@ -306,7 +306,7 @@ struct TextBuffer
 
 	int lines;
 	int caretX;
-	Typeface typeface;
+	Typeface::Font *font;
 
 	DHSTR_String fileName;
 		
@@ -421,24 +421,14 @@ internal void paste(TextBuffer *buffer);
 
 struct AvailableFont
 {
-	char *path;
-	char *name;
+	DHSTR_String path;
+	DHSTR_String name;
 };
 int cmp_font(void *va, void *vb)
 {
-	char *a = ((AvailableFont *)va)->name;
-	char *b = ((AvailableFont *)vb)->name;
-	while (*a && *b)
-	{
-		if (*a != *b)
-		{
-			return  *a - *b;
-		}
-		++a; 
-		++b; 
-	}
-
-	return *a-*b; 
+	DHSTR_String a = ((AvailableFont *)va)->name;
+	DHSTR_String b = ((AvailableFont *)vb)->name;
+	return DHSTR_cmp(a, b, string_cmp_longer_bigger);
 }
 DEFINE_Complete_ORD_DynamicArray(AvailableFont,cmp_font);
 struct AvailableTypeface
@@ -449,6 +439,7 @@ struct AvailableTypeface
 };
 DEFINE_DynamicArray(AvailableTypeface);
 DynamicArray_AvailableTypeface availableTypefaces = DHDS_constructDA(AvailableTypeface, 250, default_allocator);
+static ORD_DynamicArray_AvailableFont availableFonts = DHDS_ORD_constructDA(AvailableFont, 500, default_allocator);
 
 
 // this is a 'generic' view of a buffer with all the data the Lexer needs
