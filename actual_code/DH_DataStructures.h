@@ -345,7 +345,6 @@ void _maybe_grow(HashTable_##key_type##_##value_type *hashtable);\
 \
 value_type *insert(HashTable_##key_type##_##value_type *hashtable, key_type key, value_type value)\
 {\
-	assert(HT_count(hashtable) == hashtable->length && "insert early");\
 	_maybe_grow(hashtable);\
 	unsigned int index = ((unsigned int)hash_function(key)) % hashtable->capacity;\
 	int inital_index = index;\
@@ -365,13 +364,11 @@ value_type *insert(HashTable_##key_type##_##value_type *hashtable, key_type key,
 	bucket.value = value;\
 	hashtable->buckets[index] = bucket;\
 	++hashtable->length;\
-	assert(HT_count(hashtable) == hashtable->length && "insert late");\
 	return &hashtable->buckets[index].value;\
 }\
 \
 void _maybe_grow(HashTable_##key_type##_##value_type *hashtable)\
 {\
-	assert(HT_count(hashtable) == hashtable->length && "maybe_grow early");\
 	float new_load_factor =((float)hashtable->length + 1) / ((float)hashtable->capacity);\
 	if ( new_load_factor > HT_OPTIMAL_LOAD_FACTOR)\
 	{\
@@ -389,12 +386,10 @@ void _maybe_grow(HashTable_##key_type##_##value_type *hashtable)\
 		assert(prev_len == new_hashtable.length);\
 		*hashtable = new_hashtable;\
 	}\
-	assert(HT_count(hashtable) == hashtable->length && "maybe_grow late");\
 }\
 \
 HashBucket_##key_type##_##value_type *lookup_bucket(HashTable_##key_type##_##value_type *hashtable, key_type key, bool *success)\
 {\
-	assert(HT_count(hashtable) == hashtable->length && "lookup early");\
 	int index = ((unsigned int) hash_function(key)) % hashtable->capacity;\
 	for(int i = 0; i< hashtable->capacity; i++)\
 	{\
@@ -415,7 +410,6 @@ HashBucket_##key_type##_##value_type *lookup_bucket(HashTable_##key_type##_##val
 	}\
 	if(success)\
 		*success = false;\
-	assert(HT_count(hashtable) == hashtable->length && "lookup late");\
 	return (HashBucket_##key_type##_##value_type *)0;\
 }\
 bool lookup(HashTable_##key_type##_##value_type *hashtable, key_type key, value_type ** _out_res)\
@@ -643,7 +637,7 @@ void binsumtree_double_size(DynamicArray_int *tree)
 
 void binsumtree_set_relative(DynamicArray_int *tree, int index, int delta)
 {
-	while (index>tree->capacity / 2)binsumtree_double_size(tree);
+	while (index>=tree->capacity / 2)binsumtree_double_size(tree);
 	if (!binsumtree_index_from_leef_index(tree, index, &index))return;
 	tree->start[index] += delta;
 	while (binsumtree_parent(tree, index, &index))
@@ -655,8 +649,12 @@ void binsumtree_set_relative(DynamicArray_int *tree, int index, int delta)
 
 void binsumtree_set(DynamicArray_int *tree, int index, int elem)
 {
-	while (index>tree->capacity / 2)binsumtree_double_size(tree);
-	if (!binsumtree_index_from_leef_index(tree, index, &index))return;
+	while (index>=tree->capacity / 2)binsumtree_double_size(tree);
+	if (!binsumtree_index_from_leef_index(tree, index, &index))
+	{
+		assert(false);
+		return;
+	}
 	int delta = elem- tree->start[index];
 	tree->start[index] = elem;
 	while (binsumtree_parent(tree, index, &index))
@@ -724,10 +722,11 @@ void binsumtree_maybegrow(DynamicArray_int *tree)
 	if (tree->start[tree->capacity - 2] != 0)binsumtree_double_size(tree);
 }
 
-void binsumtree_insert(DynamicArray_int *tree, int index, int elem)
+void binsumtree_insert(DynamicArray_int *tree, int leef_index, int elem)
 {
 	binsumtree_maybegrow(tree);
-	if (!binsumtree_index_from_leef_index(tree, index, &index))return;
+	int index;
+	if (!binsumtree_index_from_leef_index(tree, leef_index, &index))return;
 	memmove(&tree->start[index + 1], &tree->start[index], (tree->capacity - (index+1))*sizeof(int));
 	tree->start[index] = elem;
 	binsumtree_recalc_sum(tree);

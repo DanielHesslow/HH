@@ -114,11 +114,11 @@ internal void gotoStartOfLine(TextBuffer *textBuffer, int line, select_ selectio
 	
 	for (int i = 0; i<currentChar - lineChar; i++)
 	{
-		move_nc(textBuffer, dir_left, caretIdIndex, do_log, selection);
+		move_nc(textBuffer, dir_left, caretIdIndex, do_log, selection,movemode_byte);
 	}
 	for (int i = 0; i<lineChar - currentChar; i++)
 	{
-		move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection);
+		move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection, movemode_byte);
 	}
 }
 
@@ -136,7 +136,9 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 	// this move left move right crap is so that we're easily getting the next character
 	// it's hacky as hell. I'll need to fix this at some point. not sure it'll look better with the current infrastructure though...
 	// are we sure that we shouldn't log this??
-	if (!move_nc(textBuffer, dir_right, caretIdIndex, no_log, selection))
+	
+	//FUCKING ALSO THIS DOENS'T WORK WITH UNICODE
+	if (!move_nc(textBuffer, dir_right, caretIdIndex, no_log, selection, movemode_codepoint))
 		return;
 
 	while (1)
@@ -152,16 +154,15 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 
 		x += dx;
 
-		if (!move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection))
+		if (!move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection,movemode_codepoint))
 			return;
 	}
-	move_nc(textBuffer, dir_left, caretIdIndex, no_log, selection);
+	move_nc(textBuffer, dir_left, caretIdIndex, no_log, selection, movemode_codepoint);
 }
 
 
 // ---SELECTIONS---
 
-internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type);
 void setNoSelection(TextBuffer *textBuffer, int caretIdIndex, log_ log)
 {
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
@@ -169,11 +170,11 @@ void setNoSelection(TextBuffer *textBuffer, int caretIdIndex, log_ log)
 	int length = getCaretPos(textBuffer->backingBuffer->buffer, caretId) - getCaretPos(textBuffer->backingBuffer->buffer, selectionCaretId);
 	for (int i = 0; i < length; i++)
 	{
-		move_llnc(textBuffer, dir_right, caretIdIndex,log == do_log, move_caret_selection);
+		move_llnc(textBuffer, dir_right, caretIdIndex,log == do_log, move_caret_selection,movemode_byte);
 	}
 	for (int i = 0; i < -length; i++)
 	{
-		move_llnc(textBuffer, dir_left, caretIdIndex, log == do_log, move_caret_selection);
+		move_llnc(textBuffer, dir_left, caretIdIndex, log == do_log, move_caret_selection, movemode_byte);
 	}
 }
 
@@ -239,15 +240,18 @@ internal void redoLineSumTree(BackingBuffer *backingBuffer)
 	MGB_Iterator it = getIterator(backingBuffer->buffer);
 	int counter = 0;
 	int line = 0;
+	int read;
 	do {
-		char character = *getCharacter(backingBuffer->buffer, it);
-		++counter;
-		if (isLineBreak(character))
+		uint32_t codepoint;
+		read = getCodePoint(backingBuffer->buffer, it, &codepoint);
+		counter += read;
+		if (isLineBreak(codepoint))
 		{
+			assert(counter != 0);
 			binsumtree_set(sum_tree, line++, counter);
 			counter = 0;
 		}
-	} while (getNext(backingBuffer->buffer, &it));
+	} while (MoveIterator(backingBuffer->buffer,&it,read));
 }
 
 internal void initLineSumTree(BackingBuffer *backingBuffer,DH_Allocator allocator)
@@ -282,7 +286,7 @@ internal int getLine(TextBuffer *textBuffer, int pos)
 					if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
 					int len = sum_tree->start[leef_index];
 
-					binsumtree_set(sum_tree, entry.location.line, entry.location.column +1); // we count the linebreak on the current line aswell.
+					binsumtree_set(sum_tree, entry.location.line, entry.location.column +1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?)
 					binsumtree_insert(sum_tree, entry.location.line+1, len-entry.location.column);
 				}
 				else
@@ -370,10 +374,10 @@ internal float getCurrentScale(TextBuffer *textBuffer, int caretIndexId)
 
 //---Character Functions---
 
-internal bool isLineBreak(char i)
+internal bool isLineBreak(uint32_t codepoint)
 {
 	// a vertical is not a linebreak btw.. (what does c say??)
-	return i == 0x000A || i == 0x000C || i == 0x000D|| i == 0x0085 || i == 0x2028 || i == 0x2029;
+	return codepoint == 0x000A || codepoint == 0x000C || codepoint == 0x000D|| codepoint == 0x0085 || codepoint == 0x2028 || codepoint == 0x2029;
 }
 internal bool isVerticalTab(char c)
 {
@@ -566,23 +570,26 @@ internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direct
 	return bytes_of_codepoint(cursorId, mgb, dir);//tmp till I figure this stuff out.
 }
 
-enum MOVE_MODE
-{
-	byte,
-	codepoint,
-	grapheme_cluster,
-	word,
-	line,
-};
+
 //low level no cleanup basically a wrapper to the multigapbuffer
-internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, Location loc, int caretId, bool log)
+internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, bool log, MoveMode mode)
 {
+	Location loc;
+	if(log)
+		loc = getLocationFromCaret(textBuffer, caretId);
 	bool success = false;
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
+	int move_len;
+	if (mode == movemode_byte)
+		move_len = 1;
+	else if (mode == movemode_codepoint)
+		move_len = bytes_of_codepoint(caretId, mgb, dir);
+	else if (mode == movemode_grapheme_cluster)
+		move_len = bytes_of_grapheme_cluster(caretId, mgb, dir);
+
 	if (dir == dir_left)
 	{
-		int diff = bytes_of_grapheme_cluster(caretId, mgb, dir_left);
-		for (int i = 0; i < diff; i++)
+		for (int i = 0; i < move_len; i++)
 			if (mgb_moveLeft(mgb, caretId))
 			{
 				if (log)
@@ -592,8 +599,7 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, Location loc, in
 	}
 	else //dir_right
 	{
-		int diff = bytes_of_grapheme_cluster(caretId, mgb, dir_right);
-		for (int i = 0; i < diff; i++)
+		for (int i = 0; i < move_len; i++)
 			if (mgb_moveRight(mgb, caretId))
 			{
 				if (log)
@@ -604,34 +610,26 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, Location loc, in
 	return success;
 }
 
-internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type)
+internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type,MoveMode mode)
 {
-	int caretId_i = textBuffer->ownedCarets_id.start[caretIdIndex];
-	int caretId_s = textBuffer->ownedSelection_id.start[caretIdIndex];
-	Location loc_i, loc_s;
-	if (log) {
-		loc_s = getLocationFromCaret(textBuffer, caretId_s);
-		loc_i = getLocationFromCaret(textBuffer, caretId_i);
-	}
-	
 	bool success=false;
 	if (type == move_caret_both || type == move_caret_insert)
 	{
-		success |= move_llnc_(textBuffer, dir, loc_i,caretId_i, log);
+		success |= move_llnc_(textBuffer, dir, textBuffer->ownedCarets_id.start[caretIdIndex], log,mode);
 	}
 
 	if (type == move_caret_both || type == move_caret_selection)
 	{
-		success |= move_llnc_(textBuffer, dir, loc_s,caretId_s, log);
+		success |= move_llnc_(textBuffer, dir, textBuffer->ownedSelection_id.start[caretIdIndex], log, mode);
 	}
 	return success;
 }
 
 
 
-internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection)
+internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection, MoveMode mode)
 {
-	bool success = move_llnc(textBuffer, dir, caretIdIndex, log == do_log, move_caret_insert);
+	bool success = move_llnc(textBuffer, dir, caretIdIndex, log == do_log, move_caret_insert,mode);
 	if (selection == no_select)
 	{
 		setNoSelection(textBuffer, caretIdIndex,log);
@@ -642,7 +640,7 @@ internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, l
 
 internal bool move(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection)
 {
-	bool success = move_nc(textBuffer, dir, caretIdIndex, log, selection);
+	bool success = move_nc(textBuffer, dir, caretIdIndex, log, selection,movemode_grapheme_cluster);
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
 	removeOwnedEmptyCarets(textBuffer);
 	return success;
@@ -652,7 +650,7 @@ internal void move(TextBuffer *textBuffer, Direction dir, log_ log, select_ sele
 {
 	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
 	{
-		move_nc(textBuffer,dir, i, log, selection);
+		move_nc(textBuffer,dir, i, log, selection,movemode_grapheme_cluster);
 		markPreferedCaretXDirty(textBuffer, i);
 	}
 	removeOwnedEmptyCarets(textBuffer);
@@ -763,7 +761,7 @@ internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdInd
 	if (targetLine >= 0 && targetLine < getLines(textBuffer->backingBuffer))
 	{
 		gotoStartOfLine(textBuffer, targetLine, selection, caretIdIndex);
-		moveCaretToX(textBuffer, getPreferedCaretX(textBuffer,caretIdIndex), selection, caretIdIndex);
+		//moveCaretToX(textBuffer, getPreferedCaretX(textBuffer,caretIdIndex), selection, caretIdIndex);
 	}
 }
 internal void moveUp_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex) //handle selecitons
@@ -790,12 +788,12 @@ internal void insertTab(TextBuffer *textBuffer)
 		int diff = currentChar - lineChar;
 		for (int j = 0; j<diff; j++)
 		{
-			move_nc(textBuffer,dir_left,i,do_log,no_select);
+			move_nc(textBuffer,dir_left,i,do_log,no_select,movemode_byte);
 		}
 		appendCharacter(textBuffer, '\t');
 		for (int j = 0; j<diff; j++)
 		{
-			move_nc(textBuffer,dir_right,i,do_log,no_select);
+			move_nc(textBuffer,dir_right,i,do_log,no_select,movemode_byte);
 		}
 	}
 }
@@ -811,7 +809,7 @@ internal void removeTab(TextBuffer *textBuffer)
 		int diff = currentChar - lineChar;
 		for (int j = 0; j<diff; j++)
 		{
-			move_nc(textBuffer,dir_left,i,do_log,no_select);
+			move_nc(textBuffer,dir_left,i,do_log,no_select,movemode_byte);
 		}
 		if (*get(textBuffer->backingBuffer->buffer, caretId,dir_right)== '\t')
 		{
@@ -819,25 +817,23 @@ internal void removeTab(TextBuffer *textBuffer)
 		}
 		for (int j = 0; j<diff-1; j++)
 		{
-			move_nc(textBuffer,dir_right,i,do_log,no_select);
+			move_nc(textBuffer,dir_right,i,do_log,no_select, movemode_byte);
 		}
 	}
 } 
 
-
 internal void gotoCharacter(TextBuffer *textBuffer, int target,int caretIdIndex)
 {
-	
 	int current = getCaretPos(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[caretIdIndex]);;
 	int diff = target - current;
 	
 	for (int i = 0; i <-diff; i++)
 	{
-		move_nc(textBuffer,dir_left,caretIdIndex,do_log,no_select);
+		move_nc(textBuffer,dir_left,caretIdIndex,do_log,no_select,movemode_byte);
 	}
 	for (int i = 0; i < diff; i++)
 	{
-		move_nc(textBuffer,dir_right,caretIdIndex,do_log,no_select);
+		move_nc(textBuffer,dir_right,caretIdIndex,do_log,no_select, movemode_byte);
 	}
 }
 
@@ -854,10 +850,8 @@ internal char *getInitialCharacter(MultiGapBuffer *buffer)
 
 //win32 forwardDelc
 
-
 // ---- stb TrueType stuff
 
-uint64_t getMicros();
 internal void setUpTT(stbtt_fontinfo *allocationInfo, char *font_path)
 {
 	long size;
@@ -1261,7 +1255,6 @@ Typeface::Font *getFont(DHSTR_String name)
 		for (int i = 0; i < availableFonts.length; i++)
 		{
 			if (!rem[i])continue;
-			//heh.. I'm so sorry for the indexing. FIX ME.
 			if (availableFonts.start[i].name.start[s] != name.start[s])
 			{
 				if (rem_len == 1)
@@ -2521,7 +2514,6 @@ bool colorIsDirty=true;
 
 internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int x, int y,bool isActive)
 {
-	/*
 	if(isActive)
 		renderRectColor(bitmap, 0, 0, bitmap.width, bitmap.height, activeColor);
 	else
@@ -2533,12 +2525,12 @@ internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int 
 	sprintf(string, "history_index: %d, loc:(%d:%d)\t mem:%dkb\t memBlocks:%d @%0.2f \t %s%s", buffer->backingBuffer->history.current_index, loc.line,loc.column, memoryConsumption/1024,blocks.length, memoryEffectivity, "font_name", "font_style");
 	
 	// bad, these allocations are completely unnessesary.. (and the only two we do every frame)
-	char *fileName = createcharFromchar16_t(buffer->fileName);
-	DHSTR_String allocationInfo = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING(string), DHSTR_MAKE_STRING(fileName));
+	DHSTR_String allocationInfo = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING(string), buffer->fileName);
 	
-	renderText(bitmap, DHSTR_UTF8_FROM_STRING(allocationInfo,alloca), scale, foregroundColor, x, y, &buffer->typeface.Italic);
+	renderText(bitmap, DHSTR_UTF8_FROM_STRING(allocationInfo,alloca), scale, foregroundColor, x, y, buffer->font);
 	//the filename looks freed to me... :/
-	free_(fileName);
+	
+	/*
 	*/
 }
 

@@ -134,13 +134,10 @@ MGB_Iterator getIterator(MultiGapBuffer *buffer)
 	return{block_index, 0};
 }
 
-
-
 int getCodePoint(MultiGapBuffer *buffer, MGB_Iterator it, uint32_t *code_point)
 {
 	int max_read = buffer->blocks.start[it.block_index].length - it.sub_index;
-	int read = codepoint_read(getCharacter(buffer, it), max_read, code_point);
-	return read;
+	return codepoint_read(getCharacter(buffer, it), max_read, code_point);
 }
 
 bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it, int *wasCaret)

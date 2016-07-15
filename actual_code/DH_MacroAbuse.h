@@ -13,6 +13,8 @@
 
 #define ALLOCATE(bytes_to_alloc)Allocate(macro_used_allocator,bytes_to_alloc,DHMA_LOCATION)
 
+#define SSET(ptr,value)do{if(ptr!=value)*ptr=value;}while(0)
+
 
 
 // --- DEBUG STUFF---

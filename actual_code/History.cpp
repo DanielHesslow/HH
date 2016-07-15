@@ -69,9 +69,9 @@ void undo_history_event(TextBuffer *textBuffer, HistoryEntry prev_entry)
 	{
 	case action_move:
 		for (int i = 0; i < -prev_entry.direction; i++)
-			move_llnc(textBuffer, dir_right, prev_entry.caretIdIndex, false, prev_entry.selection ? move_caret_selection : move_caret_insert);
+			move_llnc(textBuffer, dir_right, prev_entry.caretIdIndex, false, prev_entry.selection ? move_caret_selection : move_caret_insert, movemode_byte);
 		for (int i = 0; i < prev_entry.direction; i++)
-			move_llnc(textBuffer, dir_left, prev_entry.caretIdIndex, false, prev_entry.selection ? move_caret_selection : move_caret_insert);
+			move_llnc(textBuffer, dir_left, prev_entry.caretIdIndex, false, prev_entry.selection ? move_caret_selection : move_caret_insert, movemode_byte);
 		break;
 	case action_add:
 		removeCharacter(textBuffer, prev_entry.caretIdIndex, false);

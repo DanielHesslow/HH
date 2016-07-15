@@ -365,14 +365,12 @@ void loadFonts()
 		trimEnd(valueName, "regular ");
 
 		AvailableFont typeface = {};
-		typeface.name = DHSTR_MAKE_STRING(valueName);
-		typeface.path = DHSTR_MERGE(system_fonts_file, DHSTR_MAKE_STRING(valueData),ALLOCATE);
+		typeface.name = DHSTR_CPY(DHSTR_MAKE_STRING(valueName),ALLOCATE);
 		
 		if ((valueData[1] == ':') && false)
 		{
 			typeface.path = DHSTR_CPY(DHSTR_MAKE_STRING(valueData), ALLOCATE);
-		}
-		else
+		} else
 		{
 			typeface.path = DHSTR_MERGE(system_fonts_file, DHSTR_MAKE_STRING(valueData),ALLOCATE);
 		}

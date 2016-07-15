@@ -382,7 +382,7 @@ enum select_
 };
 struct MGB_Iterator;
 
-internal bool 		isLineBreak(char i);
+internal bool 		isLineBreak(uint32_t codepoint);
 internal void 		appendCharacter(TextBuffer *textBuffer, char character, int caretId, bool log = true);
 internal void		removeCharacter(TextBuffer *textBuffer, bool log = true);
 
@@ -409,8 +409,14 @@ internal void moveWhile(TextBuffer *textBuffer, select_ selection, log_ log, boo
 internal bool whileSameLine(char character, int *state);
 internal void move(TextBuffer *textBuffer, Direction dir, log_ log, select_ selection);
 internal bool move(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection);
-internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection);
-internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type);
+enum MoveMode
+{
+	movemode_byte,
+	movemode_codepoint,
+	movemode_grapheme_cluster,
+};
+internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection, MoveMode mode);
+internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type, MoveMode mode);
 
 
 // should be in the win32 header.
