@@ -270,7 +270,7 @@ internal int getLine(TextBuffer *textBuffer, int pos)
 {
 	
 	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
-	
+	//we don't fucking work at the end. fix me.	
 	//incremental updates
 	HistoryEntry entry;
 	while (next_history_change(textBuffer->backingBuffer, &getLine, &entry))
@@ -335,11 +335,13 @@ internal int getLine(TextBuffer *textBuffer, int pos)
 	}
 	return res_index;
 }
+
 internal int getLineStart(BackingBuffer *backingBuffer, int line)
 {
 	int start = binsumtree_getSumUntil(&backingBuffer->lineSumTree, line);
 	return start;
 }
+
 internal Location getLocation(TextBuffer *buffer, int pos)
 {
 	Location loc;
@@ -399,6 +401,9 @@ internal bool isFuncDelimiter(char i)
 	if (i == '_')return false;
 	return isWordDelimiter(i);
 }
+
+
+
 
 
 internal bool validSelection(TextBuffer *buffer)
@@ -565,9 +570,79 @@ internal int bytes_of_codepoint(int cursorId, MultiGapBuffer *mgb, Direction dir
 
 }
 
+
+internal bool can_break_grapheme_cluster(uint32_t codepoint_a, uint32_t codepoint_b)
+{
+#define CR 0x000D //carage return
+#define LF 0x000A //line feed
+#define  ZWJ 0x200D //zero width joiner
+#define ZWNJ 0x200C //zero width nonjoiner
+
+	dprs("checking break between: ");
+	dpr(codepoint_a);
+	dpr(codepoint_b);
+
+	int general_category_a = PROPERTY_GET_GC(codepoint_a);
+	int general_category_b = PROPERTY_GET_GC(codepoint_b);
+
+	// !! GB1 !!
+	if (codepoint_a == 0 || codepoint_b == 0)return true;
+	// !! GB2 !!
+
+	//GB3
+	if (codepoint_a == CR && codepoint_b == LF)return false;
+	//GB 4
+	if ((general_category_a & UTF8_CATEGORY_CONTROL || codepoint_a == CR|| codepoint_a == LF)) return true;
+	//GB 5
+	if ((general_category_b & UTF8_CATEGORY_CONTROL || codepoint_b == CR || codepoint_b == LF)) return true;
+
+	// !! GB6 !!
+	// !! GB7 !!
+	// !! GB8 !!
+	//GB 9
+	if ((general_category_b & (UTF8_CATEGORY_MARK_NON_SPACING | UTF8_CATEGORY_MARK_ENCLOSING)) || codepoint_b == ZWJ || codepoint_b == ZWNJ) return false;
+
+	return true;
+}
 internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direction dir)
 {
-	return bytes_of_codepoint(cursorId, mgb, dir);//tmp till I figure this stuff out.
+	uint32_t codepoint_a = 0;
+	uint32_t codepoint_b = 0;
+
+	int ack=0;
+	MGB_Iterator it = getIteratorFromCaret(mgb, cursorId);
+
+	if (dir == dir_left)
+	{
+		MoveIterator(mgb,&it,-bytes_of_codepoint(cursorId, mgb, dir));
+		ack += getCodePoint(mgb, it, &codepoint_a);
+		for (;;)
+		{
+			MoveIterator(mgb, &it, -bytes_of_codepoint(cursorId, mgb, dir));
+			int read = getCodePoint(mgb, it, &codepoint_b);
+			if(can_break_grapheme_cluster(codepoint_b, codepoint_a))return ack;
+			else {
+				ack += read;
+				codepoint_a = codepoint_b;
+			}
+		} 
+	}
+	
+	if (dir == dir_right)
+	{
+		ack += getCodePoint(mgb, it, &codepoint_a);
+		for (;;)
+		{
+			MoveIterator(mgb, &it, bytes_of_codepoint(cursorId, mgb, dir));
+			int read = getCodePoint(mgb, it, &codepoint_b);
+			if (can_break_grapheme_cluster(codepoint_a, codepoint_b)) return ack;
+			else {
+				ack += read;
+				codepoint_a = codepoint_b;
+			}
+		}
+	}
+	//return bytes_of_codepoint(cursorId, mgb, dir);//tmp till I figure this stuff out.
 }
 
 
