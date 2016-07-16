@@ -202,53 +202,6 @@ bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
 }
 
 
-bool getNext_old(MultiGapBuffer *buffer, MGB_Iterator *it)
-{
-	++it->sub_index;
-	if (it->sub_index > buffer->blocks.start[it->block_index].length-1)
-	{
-		if (it->block_index >= buffer->blocks.length - 1)
-		{
-			--it->sub_index;
-			return false;
-		}
-		else
-		{
-			it->sub_index = 0;
-			++it->block_index;
-			if (buffer->blocks.start[it->block_index].length==0)
-			{
-				return getNext(buffer, it);
-			}
-		}
-	}
-	return true;
-}
-
-bool getPrev_old(MultiGapBuffer *buffer, MGB_Iterator *it)
-{
-
-	--it->sub_index;
-	if (it->sub_index < 0)
-	{
-		if (it->block_index <= 0)
-		{
-			it->sub_index = 0;
-			return false;
-		}
-		else
-		{
-			it->sub_index = buffer->blocks.start[--it->block_index].length - 1;
-			if (it->sub_index < 0)
-			{
-				return getPrev(buffer, it);
-			}
-		}
-	}
-	return true;
-}
-
-
 
 char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)
 {
