@@ -272,7 +272,7 @@ internal inline bool int_eq(int a, int b)
 	return a == b;
 }
 DEFINE_HashTable(ulli, CharBitmap, silly_hash_lli, lli_eq);
-DEFINE_HashTable(char, int, sillyhash_char, char_eq);
+DEFINE_HashTable(int, int, silly_hash, int_eq);
 
 struct Typeface
 {
@@ -280,7 +280,7 @@ struct Typeface
 	{
 		stbtt_fontinfo *font_info;
 		HashTable_ulli_CharBitmap cachedBitmaps;
-		HashTable_char_int cachedGlyphs;
+		HashTable_int_int cachedGlyphs;
 		int ascent, descent, lineHeight, lineGap;
 	}Light, DemiLight, Regular, DemiBold, Bold, Black, Italic, BoldItalic;// use
 };

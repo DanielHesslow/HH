@@ -141,9 +141,69 @@ int getCodePoint(MultiGapBuffer *buffer, MGB_Iterator it, uint32_t *code_point)
 	return codepoint_read(getCharacter(buffer, it), max_read, code_point);
 }
 
-bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it, int *wasCaret)
+int length_of_block(MultiGapBuffer *buffer, int index)
 {
-	if (wasCaret)*wasCaret = -1;
+	return buffer->blocks.start[index].length;
+}
+
+// push the iterator to the right-most 'same' position. 
+// returns false if there is no character to the right, true otherwise
+bool pushRight(MultiGapBuffer *buffer, MGB_Iterator *it)
+{
+	while (it->sub_index >= length_of_block(buffer, it->block_index))
+	{
+		if (it->block_index == buffer->blocks.length - 1) return false;
+		*it = { it->block_index + 1, it->sub_index - length_of_block(buffer, it->block_index) };
+	}
+	return true;
+}
+
+// push the iterator to the left-most same position 
+// returns false if there is no character to the left, true otherwise
+bool pushLeft(MultiGapBuffer *buffer, MGB_Iterator *it)
+{
+	while (it->sub_index <=0)
+	{
+		if (it->block_index == 0)return false;
+		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)-it->sub_index };
+	}
+	return true;
+}
+
+
+bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it)
+{
+	// hrm I wonder why the initial pushRight is neccessary? I though it was first, now I don't get it though. (since i though we allow negative indexing)
+	if (!pushRight(buffer, it)) return false;
+	++it->sub_index;
+	if (!pushRight(buffer, it)) return false;
+	return true;
+}
+
+bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it)
+{
+	if (!pushLeft(buffer, it)) return false;
+	--it->sub_index;
+	if (!pushLeft(buffer, it)) return false;
+	return true;
+}
+
+bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
+{
+	for (int i = 0; i < direction; i++)
+	{
+		if (!getNext(buffer, it))return false;
+	}
+	for (int i = 0; i < -direction; i++) // minus direction y'all
+	{
+		if (!getPrev(buffer, it))return false;
+	}
+	return true;
+}
+
+
+bool getNext_old(MultiGapBuffer *buffer, MGB_Iterator *it)
+{
 	++it->sub_index;
 	if (it->sub_index > buffer->blocks.start[it->block_index].length-1)
 	{
@@ -154,10 +214,9 @@ bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it, int *wasCaret)
 		}
 		else
 		{
-			if (wasCaret)*wasCaret = it->block_index;
 			it->sub_index = 0;
 			++it->block_index;
-			if (it->sub_index == buffer->blocks.start[it->block_index].length)
+			if (buffer->blocks.start[it->block_index].length==0)
 			{
 				return getNext(buffer, it);
 			}
@@ -166,7 +225,7 @@ bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it, int *wasCaret)
 	return true;
 }
 
-bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it)
+bool getPrev_old(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
 
 	--it->sub_index;
@@ -189,18 +248,6 @@ bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it)
 	return true;
 }
 
-bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
-{
-	for (int i = 0; i < direction; i++)
-	{
-		if (!getNext(buffer, it))return false;
-	}
-	for (int i = 0; i < -direction; i++) // minus direction y'all
-	{
-		if (!getPrev(buffer, it))return false;
-	}
-	return true;
-}
 
 
 char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)

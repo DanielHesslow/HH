@@ -618,7 +618,7 @@ internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direct
 		ack += getCodePoint(mgb, it, &codepoint_a);
 		for (;;)
 		{
-			MoveIterator(mgb, &it, -bytes_of_codepoint(cursorId, mgb, dir));
+			if (!MoveIterator(mgb, &it, -bytes_of_codepoint(cursorId, mgb, dir)))return ack;
 			int read = getCodePoint(mgb, it, &codepoint_b);
 			if(can_break_grapheme_cluster(codepoint_b, codepoint_a))return ack;
 			else {
@@ -627,13 +627,13 @@ internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direct
 			}
 		} 
 	}
-	
-	if (dir == dir_right)
+	else //dir_right
 	{
+		assert(dir == dir_right);
 		ack += getCodePoint(mgb, it, &codepoint_a);
 		for (;;)
 		{
-			MoveIterator(mgb, &it, bytes_of_codepoint(cursorId, mgb, dir));
+			if (!MoveIterator(mgb, &it, bytes_of_codepoint(cursorId, mgb, dir)))return ack;
 			int read = getCodePoint(mgb, it, &codepoint_b);
 			if (can_break_grapheme_cluster(codepoint_a, codepoint_b)) return ack;
 			else {
@@ -642,7 +642,6 @@ internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direct
 			}
 		}
 	}
-	//return bytes_of_codepoint(cursorId, mgb, dir);//tmp till I figure this stuff out.
 }
 
 
@@ -944,15 +943,34 @@ internal void setUpTT(stbtt_fontinfo *allocationInfo, char *font_path)
 	stbtt_InitFont(allocationInfo, fontBuffer, 0);
 }
 
-internal int getCharacterWidth_std(uint32_t currentChar, uint32_t nextChar, Typeface::Font *typeface, float scale)
+internal int getGlyph(Typeface::Font *font, int codepoint)
+{
+	int *p_glyph_index;
+	int glyph_index;
+	if (lookup(&font->cachedGlyphs, codepoint, &p_glyph_index))
+	{
+		glyph_index = *p_glyph_index;
+	}
+	else
+	{
+		glyph_index = stbtt_FindGlyphIndex(font->font_info, codepoint);
+		insert(&font->cachedGlyphs, codepoint, glyph_index);
+	}
+	return glyph_index;
+}
+
+internal int getCharacterWidth_std(uint32_t currentChar, uint32_t nextChar, Typeface::Font *font, float scale)
 {
 	if (currentChar == VK_TAB)
 	{
-		return getCharacterWidth_std(' ', ' ', typeface, scale) * 4;
+		return getCharacterWidth_std(' ', ' ', font, scale) * 4;
 	}
 	int advanceWidth, leftSideBearing;
-	stbtt_GetCodepointHMetrics(typeface->font_info, currentChar, &advanceWidth, &leftSideBearing);
-	int kerning = stbtt_GetCodepointKernAdvance(typeface->font_info, currentChar, nextChar);
+	int glyph_current = getGlyph(font,currentChar);
+	int glyph_next = getGlyph(font,nextChar);
+
+	stbtt_GetGlyphHMetrics(font->font_info, glyph_current, &advanceWidth, &leftSideBearing);
+	int kerning = stbtt_GetGlyphKernAdvance(font->font_info, glyph_current, glyph_next);
 	return (advanceWidth*scale + kerning*scale) * 3;
 }
 struct MGB_Iterator; //bacuse vs don't know how to highlight otherwise..
@@ -1147,7 +1165,7 @@ Typeface::Font LoadFont(DHSTR_String path)
 {
 	Typeface::Font ret = {};
 	ret.cachedBitmaps = DHDS_constructHT(ulli, CharBitmap, 256, default_allocator);
-	ret.cachedGlyphs = DHDS_constructHT(char, int, 256, default_allocator);
+	ret.cachedGlyphs = DHDS_constructHT(int, int, 256, default_allocator);
 	ret.font_info = (stbtt_fontinfo *)Allocate(default_allocator, sizeof(stbtt_fontinfo), "fontinfo_info");
 	ret.font_info->userdata = "stbtt internal allocation";
 	setUpTT(ret.font_info,DHSTR_UTF8_FROM_STRING(path,alloca));
@@ -1354,7 +1372,8 @@ Typeface::Font *getFont(DHSTR_String name)
 			return getFont(i);
 		}
 	}
-
+	assert(false && "cosmic rays, are strong in this one");
+	return 0;
 }
 
 global_variable int running_textBuffer_id = 200;
@@ -1365,6 +1384,7 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	TextBuffer textBuffer = {};
 	textBuffer.allocator = allocator;
 	textBuffer.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
+	//textBuffer.font = getFont(DHSTR_MAKE_STRING("Segoe UI Symbol"));
 	textBuffer.textBuffer_id = running_textBuffer_id++;
 	textBuffer.bufferType = regularBuffer;
 	textBuffer.KeyBindings = DHDS_constructDA(KeyBinding,20, allocator);
@@ -1513,7 +1533,6 @@ internal void getFileWriteTime_PLATFORM(char *fileName)
 
 internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String fileName)
 {
-	//how the fuck did I corrrupt font.ttf
 	//Failure Point
 
 	FILE *file;
@@ -1522,10 +1541,8 @@ internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String fileName)
 	{
 		MGB_Iterator it = getIterator(buffer);
 		
-		do
-		{
-			if (fputc(*getCharacter(buffer,it), file) == EOF)
-			{
+		do{
+			if (fputc(*getCharacter(buffer,it), file) == EOF){
 				break;
 			}
 		} while (getNext(buffer, &it));
@@ -1885,10 +1902,11 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 	{
 		return *lookedup;
 	}
-	
+	int glyph_index = getGlyph(font, codepoint);
+
 	//stride's additional 2 comes from where exactey, hadn't we allready taken that into account?
 	int width, height;
-	void *charBitmapMem = stbtt_GetCodepointBitmap(font_info, scale*3, scale, (int)codepoint, &width, &height, &xOff, &yOff);
+	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale*3, scale, glyph_index, &width, &height, &xOff, &yOff);
 	float die_off = 1.2; // [1.5,2]
 	float intensity = 1;
 	float subpix_bleed[] = { .5f * intensity / 3, .5f *die_off *intensity / 3 , .5f *intensity/ (3 * die_off)};

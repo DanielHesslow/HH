@@ -43,7 +43,7 @@ internal int getIteratorPos(MultiGapBuffer *buffer, MGB_Iterator it);
 internal int getCaretPos(MultiGapBuffer *buffer, int caretId);
 internal MGB_Iterator getIterator(MultiGapBuffer *buffer, int pos);
 internal MGB_Iterator getIterator(MultiGapBuffer *buffer);
-internal bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it, int *wasCaret = 0);
+internal bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it);
 internal bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it);
 internal int indexFromId(MultiGapBuffer *buffer, int id);
 internal MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id);
