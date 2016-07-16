@@ -994,6 +994,28 @@ internal int getCharacterWidth(MGB_Iterator it, TextBuffer *buffer, Typeface::Fo
 }
 
 
+enum FileEncoding
+{
+	file_encoding_utf8,
+	file_encoding_utf16,
+	file_encoding_utf32,
+	file_encoding_unknown,
+
+};
+
+FileEncoding recognize_file_encoding(void *start, size_t len, size_t *_out_length_as_utf8)
+{
+	int32_t error;
+	utf8toutf16((const char*)start, len, 0, 0, &error);
+	if (error == UTF8_ERR_NONE) { *_out_length_as_utf8 = len; return file_encoding_utf8; }
+	
+	*_out_length_as_utf8 = utf16toutf8((uint16_t *)start, len, 0, 0, &error);
+	if (error == UTF8_ERR_NONE) { return file_encoding_utf16; }
+	
+	*_out_length_as_utf8 = utf32toutf8((uint32_t *)start, len, 0, 0, &error);
+	if (error == UTF8_ERR_NONE) { return file_encoding_utf32; }
+}
+
 //this is some propper bad code... we need to clean this up. el prono. (but I do think it kinda works) littered with gotos though. 
 void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 {
@@ -1009,66 +1031,34 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 	uint64_t buffer_size;
 	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
 	
-	{ //assumed utf-8
-		int32_t error;
-		size_t actual_size = utf8toutf16((const char*)file_start, file_size, 0, 0, &error);
-		if (error != UTF8_ERR_NONE)goto utf16;
-	utf8:
-		dprs("utf8");
-		int q;
-		growTo(buffer->backingBuffer->buffer, file_size * 2);
-		char *buffer_start = (char *)buffer->backingBuffer->buffer->start;
-		memcpy(buffer_start, file_start, file_size);
-		buffer_size = file_size;
-		goto cleanup;
-	}
-	{//utf16
-		utf16:
-		growTo(buffer->backingBuffer->buffer, file_size * 4);
-		int32_t error;
-		size_t actual_size = utf16toutf8((const uint16_t *)file_start, file_size, mgb->start, mgb->length, &error);
-		switch (error)
+	size_t needed_size;
+	FileEncoding encoding = recognize_file_encoding(file_start, file_size, &needed_size);
+
+	growTo(buffer->backingBuffer->buffer, needed_size*2);
+
+	char *buffer_write_start = mgb->start;
+	size_t buffer_max_write = mgb->length;
+	switch (encoding)
+	{
+		int32_t errors;
+		case file_encoding_unknown:
+		case file_encoding_utf8:
 		{
-		case UTF8_ERR_NONE:
-			dprs("utf16");
-			buffer_size = actual_size;
-			goto cleanup;
-		case UTF8_ERR_INVALID_DATA:
-			goto utf32;
-		case UTF8_ERR_OVERLAPPING_PARAMETERS:
-			assert(false && "overlapping is not possible. literary. lib done fuck up");
-			goto cleanup;
-		case UTF8_ERR_NOT_ENOUGH_SPACE: //this 
-			assert(false && "utf 16 does not take more than 4 times the space of utf 8... Something is fucked");
-			goto cleanup;
-		}
+			memcpy(buffer_write_start, file_start, file_size);
+		}break;
+		case file_encoding_utf16:
+		{
+			utf16toutf8((const uint16_t *)file_start, file_size, buffer_write_start, buffer_max_write, &errors);
+			assert(!errors);
+		}break;
+		case file_encoding_utf32:
+		{
+			utf32toutf8((const uint32_t *)file_start, file_size, buffer_write_start, buffer_max_write, &errors);
+			assert(!errors);
+		}break;
 	}
 	
-	{//utf32
-		utf32:
-
-		growTo(buffer->backingBuffer->buffer, file_size * 4);
-		int32_t error;
-		size_t actual_size = utf32toutf8((const uint32_t *)file_start, file_size, mgb->start, mgb->length, &error);
-		switch (error)
-		{
-		case UTF8_ERR_NONE:
-			dprs("utf32");
-			buffer_size = actual_size;
-			goto cleanup;
-		case UTF8_ERR_INVALID_DATA:
-			goto utf8;
-		case UTF8_ERR_OVERLAPPING_PARAMETERS:
-			assert(false && "overlapping is not possible. literary. lib done fuck up");
-			goto utf8;
-		case UTF8_ERR_NOT_ENOUGH_SPACE: //this 
-			assert(false && "utf 32 does not take more than 4 times the space of utf 8... Something is fucked");
-			goto utf8;
-		}
-	}
-
-	cleanup:
-	buffer->backingBuffer->buffer->blocks.start[0].length = buffer_size;
+	buffer->backingBuffer->buffer->blocks.start[0].length = needed_size;
 	buffer->backingBuffer->buffer->blocks.start[0].start = 0;
 	UnmapViewOfFile(file_start);
 	CloseHandle(mapping_handle);
