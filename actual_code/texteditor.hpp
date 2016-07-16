@@ -242,7 +242,7 @@ internal void redoLineSumTree(BackingBuffer *backingBuffer)
 	int line = 0;
 	int read;
 	do {
-		uint32_t codepoint;
+		char32_t codepoint;
 		read = getCodePoint(backingBuffer->buffer, it, &codepoint);
 		counter += read;
 		if (isLineBreak(codepoint))
@@ -376,7 +376,7 @@ internal float getCurrentScale(TextBuffer *textBuffer, int caretIndexId)
 
 //---Character Functions---
 
-internal bool isLineBreak(uint32_t codepoint)
+internal bool isLineBreak(char32_t codepoint)
 {
 	// a vertical is not a linebreak btw.. (what does c say??)
 	return codepoint == 0x000A || codepoint == 0x000C || codepoint == 0x000D|| codepoint == 0x0085 || codepoint == 0x2028 || codepoint == 0x2029;
@@ -571,17 +571,14 @@ internal int bytes_of_codepoint(int cursorId, MultiGapBuffer *mgb, Direction dir
 }
 
 
-internal bool can_break_grapheme_cluster(uint32_t codepoint_a, uint32_t codepoint_b)
+internal bool can_break_grapheme_cluster(char32_t codepoint_a, char32_t codepoint_b)
 {
 #define CR 0x000D //carage return
 #define LF 0x000A //line feed
 #define  ZWJ 0x200D //zero width joiner
 #define ZWNJ 0x200C //zero width nonjoiner
 
-	dprs("checking break between: ");
-	dpr(codepoint_a);
-	dpr(codepoint_b);
-
+	
 	int general_category_a = PROPERTY_GET_GC(codepoint_a);
 	int general_category_b = PROPERTY_GET_GC(codepoint_b);
 
@@ -606,8 +603,8 @@ internal bool can_break_grapheme_cluster(uint32_t codepoint_a, uint32_t codepoin
 }
 internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direction dir)
 {
-	uint32_t codepoint_a = 0;
-	uint32_t codepoint_b = 0;
+	char32_t codepoint_a = 0;
+	char32_t codepoint_b = 0;
 
 	int ack=0;
 	MGB_Iterator it = getIteratorFromCaret(mgb, cursorId);
@@ -943,7 +940,7 @@ internal void setUpTT(stbtt_fontinfo *allocationInfo, char *font_path)
 	stbtt_InitFont(allocationInfo, fontBuffer, 0);
 }
 
-internal int getGlyph(Typeface::Font *font, int codepoint)
+internal int getGlyph(Typeface::Font *font, char32_t codepoint)
 {
 	int *p_glyph_index;
 	int glyph_index;
@@ -959,7 +956,7 @@ internal int getGlyph(Typeface::Font *font, int codepoint)
 	return glyph_index;
 }
 
-internal int getCharacterWidth_std(uint32_t currentChar, uint32_t nextChar, Typeface::Font *font, float scale)
+internal int getCharacterWidth_std(char32_t currentChar, char32_t nextChar, Typeface::Font *font, float scale)
 {
 	if (currentChar == VK_TAB)
 	{
@@ -1165,7 +1162,7 @@ Typeface::Font LoadFont(DHSTR_String path)
 {
 	Typeface::Font ret = {};
 	ret.cachedBitmaps = DHDS_constructHT(ulli, CharBitmap, 256, default_allocator);
-	ret.cachedGlyphs = DHDS_constructHT(int, int, 256, default_allocator);
+	ret.cachedGlyphs = DHDS_constructHT(char32_t, int, 256, default_allocator);
 	ret.font_info = (stbtt_fontinfo *)Allocate(default_allocator, sizeof(stbtt_fontinfo), "fontinfo_info");
 	ret.font_info->userdata = "stbtt internal allocation";
 	setUpTT(ret.font_info,DHSTR_UTF8_FROM_STRING(path,alloca));
@@ -1971,7 +1968,7 @@ struct CharRenderingInfo
 };
 
 
-internal void renderCharacter(Bitmap bitmap, uint32_t code_point, int x, int y, float scale, int color, Typeface::Font *Font)
+internal void renderCharacter(Bitmap bitmap, char32_t code_point, int x, int y, float scale, int color, Typeface::Font *Font)
 {
 	if (code_point == VK_TAB || isVerticalTab(code_point)) return;
 
@@ -1982,7 +1979,7 @@ internal void renderCharacter(Bitmap bitmap, uint32_t code_point, int x, int y, 
 }
 
 
-internal void renderCharacter(Bitmap bitmap, uint32_t code_point, CharRenderingInfo rendering)
+internal void renderCharacter(Bitmap bitmap, char32_t code_point, CharRenderingInfo rendering)
 {
 	renderCharacter(bitmap, code_point, rendering.x, rendering.y, rendering.scale, rendering.color, rendering.typeface);
 }
@@ -2000,11 +1997,11 @@ internal void renderCaret(Bitmap bitmap, int x, int y,float scale,Typeface::Font
 internal void renderText(Bitmap bitmap, char* string, float scale, int color, int x, int y, Typeface::Font *font)
 {
 	int remaining_len = DHSTR_strlen(string);
-	uint32_t last_codepoint = 0;
+	char32_t last_codepoint = 0;
 	while (*string)
 	{
-		uint32_t codepoint;
-		remaining_len -= codepoint_read(string, remaining_len, &codepoint);
+		char32_t codepoint;
+		remaining_len -= codepoint_read(string, remaining_len, (uint32_t *)&codepoint);
 		if(last_codepoint)
 			x += getCharacterWidth_std(last_codepoint,codepoint, font, scale);
 		renderCharacter(bitmap, codepoint, x, y, scale, color, font);
@@ -2015,12 +2012,12 @@ internal void renderText(Bitmap bitmap, char* string, float scale, int color, in
 
 internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int color, int x, int y, Typeface::Font *font)
 {
-	uint32_t last_codepoint = 0;
+	char32_t last_codepoint = 0;
 
 	for(int i = 0; i < string.length;)
 	{
-		uint32_t codepoint;
-		int read = codepoint_read(&string.start[i], string.length-i, &codepoint);
+		char32_t codepoint;
+		int read = codepoint_read(&string.start[i], string.length-i, (uint32_t *)&codepoint);
 		if(last_codepoint)
 			x+= getCharacterWidth_std(last_codepoint, codepoint, font, scale);
 		renderCharacter(bitmap, codepoint, x, y, scale, color, font);
@@ -2278,7 +2275,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 	rendering.color = foregroundColor;
 	rendering.typeface = textBuffer->font;
 
-	uint32_t last_codepoint=0;
+	char32_t last_codepoint=0;
 
 	
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
@@ -2291,7 +2288,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
 			bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
 
-			uint32_t codepoint;
+			char32_t codepoint;
 			int read = getCodePoint(mgb, it, &codepoint);
 			ended = !MoveIterator(mgb, &it, read);
 			

@@ -134,12 +134,6 @@ MGB_Iterator getIterator(MultiGapBuffer *buffer)
 	return{block_index, 0};
 }
 
-int getCodePoint(MultiGapBuffer *buffer, MGB_Iterator it, uint32_t *code_point)
-{
-	while (buffer->blocks.start[it.block_index].length == 0)++it.block_index;
-	int max_read = buffer->blocks.start[it.block_index].length - it.sub_index;
-	return codepoint_read(getCharacter(buffer, it), max_read, code_point);
-}
 
 int length_of_block(MultiGapBuffer *buffer, int index)
 {
@@ -203,6 +197,13 @@ bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
 
 
 
+int getCodePoint(MultiGapBuffer *buffer, MGB_Iterator it, char32_t *code_point)
+{
+	pushRight(buffer, &it);
+	int max_read = buffer->blocks.start[it.block_index].length - it.sub_index;
+	return codepoint_read(getCharacter(buffer, it), max_read, (uint32_t *)code_point);
+}
+
 char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)
 {
 	//ABC checks?
@@ -211,8 +212,7 @@ char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)
 	
 	return ret;
 }
-
-
+	
 char *get(MultiGapBuffer *buffer, int caretId, Direction dir)
 {
 	// this might get garbage on either side of the buffer

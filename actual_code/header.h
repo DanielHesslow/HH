@@ -271,8 +271,11 @@ internal inline bool int_eq(int a, int b)
 {
 	return a == b;
 }
+
+int silly_hash_char32_t(char32_t c) { return silly_hash((int)c); }
+bool char32_t_eq(char32_t a, char32_t b) { return a == b; }
 DEFINE_HashTable(ulli, CharBitmap, silly_hash_lli, lli_eq);
-DEFINE_HashTable(int, int, silly_hash, int_eq);
+DEFINE_HashTable(char32_t, int, silly_hash_char32_t, int_eq);
 
 struct Typeface
 {
@@ -280,7 +283,7 @@ struct Typeface
 	{
 		stbtt_fontinfo *font_info;
 		HashTable_ulli_CharBitmap cachedBitmaps;
-		HashTable_int_int cachedGlyphs;
+		HashTable_char32_t_int cachedGlyphs;
 		int ascent, descent, lineHeight, lineGap;
 	}Light, DemiLight, Regular, DemiBold, Bold, Black, Italic, BoldItalic;// use
 };
@@ -382,14 +385,14 @@ enum select_
 };
 struct MGB_Iterator;
 
-internal bool 		isLineBreak(uint32_t codepoint);
+internal bool 		isLineBreak(char32_t codepoint);
 internal void 		appendCharacter(TextBuffer *textBuffer, char character, int caretId, bool log = true);
 internal void		removeCharacter(TextBuffer *textBuffer, bool log = true);
 
 
 internal bool 		deleteCharacter(TextBuffer *textBuffer, int caretId,bool log = true);
 internal void 		unDeleteCharacter(TextBuffer *textBuffer, char character);
-internal int 		getCharacterWidth_std(uint32_t currentChar, uint32_t nextChar, Typeface::Font *allocationInfo, float scale);
+internal int 		getCharacterWidth_std(char32_t currentChar, char32_t nextChar, Typeface::Font *allocationInfo, float scale);
 internal int 		getCharacterWidth(MGB_Iterator iterator,TextBuffer *buffer, Typeface::Font *allocationInfo, float scale);
 //internal bool 		getNextCharacter(MultiGapBuffer *buffer, char **character);
 internal void		renderRect(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color);
