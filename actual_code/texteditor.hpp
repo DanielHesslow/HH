@@ -64,19 +64,21 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 	float scale = scaleFromLine(textBuffer, getLineFromIterator(textBuffer, it));
 	int initial_byte_pos = 0;
+	if (!MoveIterator(mgb, &it, -1));
 	for (;;)
 	{
+		if (isLineBreak(*getCharacter(mgb, it))) break;
 		if (!MoveIterator(mgb, &it, -1))break;
 		++initial_byte_pos;
-		if (isLineBreak(*getCharacter(mgb, it))) break;
 	}
-	
+	if (!MoveIterator(mgb, &it, 1));
+
 	char32_t codepoint_a, codepoint_b;
 	int ack = getCodepoint(mgb, it, &codepoint_a);
 	MoveIterator(mgb, &it, ack);
 	int read;
 	int x_ack = 0;
-	while (ack < initial_byte_pos)
+	while (ack <= initial_byte_pos)
 	{
 		read = getCodepoint(mgb, it, &codepoint_b);
 		if (!read)break;
@@ -134,7 +136,7 @@ internal void gotoStartOfLine(TextBuffer *textBuffer, int line, select_ selectio
 internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selection, int caretIdIndex)
 {
 	// this assumes that we're on the start of the line.
-
+	
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
 	float scale = scaleFromLine(textBuffer, getLineFromCaret(textBuffer, caretId));
 
@@ -144,27 +146,22 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 	MGB_Iterator it = getIteratorFromCaret(mgb, caretId);
 	char32_t codepoint_a,codepoint_b;
+	int a_read_len = getCodepoint(mgb,it,&codepoint_a);
+	int b_read_len;
 	int ack = 0;
-	getCodepoint(mgb,it,&codepoint_a);
-	MoveIterator(mgb, &it, ack);
-	int read;
-	while ((read = getCodepoint(mgb, it, &codepoint_b)))
+	MoveIterator(mgb, &it, a_read_len);
+	while ((b_read_len = getCodepoint(mgb, it, &codepoint_b)))
 	{
-		MoveIterator(mgb, &it, read);
+		MoveIterator(mgb, &it, b_read_len);
 		dx = getCharacterWidth(textBuffer, it, codepoint_a, codepoint_b, textBuffer->font, scale);
-
-		if (abs(x - targetX) < abs((x + dx) - targetX)||isLineBreak(codepoint_b))
-		{
-			break;
-		}
-
-		ack += read;
-
+		if (abs(x - targetX) < abs((x + dx) - targetX)||isLineBreak(codepoint_a)) break;
+		ack += a_read_len;
 		x += dx;
 		codepoint_a = codepoint_b;
+		a_read_len = b_read_len;
 	}
 	for (int i = 0; i < ack;i++)
-		move_nc(textBuffer, dir_right, caretIdIndex, no_log, selection, movemode_byte);
+		move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection, movemode_byte);
 }
 
 
@@ -984,20 +981,16 @@ internal int getCharacterWidth(TextBuffer *buffer, MGB_Iterator it, char32_t cur
 {
 	//currently about O(to fucking much). I'm just fucking lazy though. (I don't memoize anything)
 	MultiGapBuffer *mgb= buffer->backingBuffer->buffer;
-	char current = *getCharacter(buffer->backingBuffer->buffer, it);
 
 	for (int i = 0; i < buffer->contextCharWidthHook.length; i++)
 	{
-		if (buffer->contextCharWidthHook.start[i].character== current)
+		if (buffer->contextCharWidthHook.start[i].character == current_char)
 		{
 			return buffer->contextCharWidthHook.start[i].func(buffer,it, current_char, next_char, font, scale);
 		}
 	}
 	
-	current = current ? current : 'A';
-	getNext(buffer->backingBuffer->buffer, &it);
-	char next = *getCharacter(buffer->backingBuffer->buffer, it);
-	return getCharacterWidth_std(current, next, font, scale);
+	return getCharacterWidth_std(current_char, next_char, font, scale);
 }
 
 
@@ -2311,7 +2304,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				//int width = getCharacterWidth(q, textBuffer, rendering.typeface, rendering.scale);
 				int width = 0;
 				if (last_codepoint != 0){
-					width = getCharacterWidth_std(last_codepoint, codepoint, rendering.typeface, rendering.scale);
+					width = getCharacterWidth(textBuffer,it,last_codepoint, codepoint, rendering.typeface, rendering.scale);
 				}
 				if (selection)
 				{//lol we're effectively done in the next iteration.. :/
