@@ -291,7 +291,7 @@ struct Typeface
 
 struct ContextCharWidthHook
 {
-	typedef int(*CharWidthHookFunc)(MGB_Iterator it, TextBuffer *buffer, Typeface::Font *typeface, float scale);
+	typedef int (*CharWidthHookFunc)(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char, Typeface::Font *typeface, float scale);
 	CharWidthHookFunc func;
 	char character;
 };
@@ -392,8 +392,8 @@ internal void		removeCharacter(TextBuffer *textBuffer, bool log = true);
 
 internal bool 		deleteCharacter(TextBuffer *textBuffer, int caretId,bool log = true);
 internal void 		unDeleteCharacter(TextBuffer *textBuffer, char character);
-internal int 		getCharacterWidth_std(char32_t currentChar, char32_t nextChar, Typeface::Font *allocationInfo, float scale);
-internal int 		getCharacterWidth(MGB_Iterator iterator,TextBuffer *buffer, Typeface::Font *allocationInfo, float scale);
+internal int 		getCharacterWidth_std(char32_t currentChar, char32_t nextChar, Typeface::Font *font, float scale);
+internal int		getCharacterWidth(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char, Typeface::Font *font, float scale);
 //internal bool 		getNextCharacter(MultiGapBuffer *buffer, char **character);
 internal void		renderRect(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color);
 internal void		renderRectFullColor(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color);

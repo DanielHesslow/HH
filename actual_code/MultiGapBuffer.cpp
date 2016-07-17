@@ -159,7 +159,7 @@ bool pushLeft(MultiGapBuffer *buffer, MGB_Iterator *it)
 	while (it->sub_index <=0)
 	{
 		if (it->block_index == 0)return false;
-		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)-it->sub_index };
+		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)+it->sub_index};
 	}
 	return true;
 }
@@ -168,40 +168,35 @@ bool pushLeft(MultiGapBuffer *buffer, MGB_Iterator *it)
 bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
 	// hrm I wonder why the initial pushRight is neccessary? I though it was first, now I don't get it though. (since i though we allow negative indexing)
-	if (!pushRight(buffer, it)) return false;
 	++it->sub_index;
-	if (!pushRight(buffer, it)) return false;
-	return true;
+	return pushRight(buffer, it);
 }
 
 bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
-	if (!pushLeft(buffer, it)) return false;
 	--it->sub_index;
-	if (!pushLeft(buffer, it)) return false;
-	return true;
+	return pushLeft(buffer, it);
 }
 
 bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
 {
-	for (int i = 0; i < direction; i++)
-	{
-		if (!getNext(buffer, it))return false;
-	}
-	for (int i = 0; i < -direction; i++) // minus direction y'all
-	{
-		if (!getPrev(buffer, it))return false;
-	}
-	return true;
+	it->sub_index += direction;
+	if (direction > 0)return pushRight(buffer, it);
+	else return pushLeft(buffer, it);
 }
 
-
-
-int getCodePoint(MultiGapBuffer *buffer, MGB_Iterator it, char32_t *code_point)
+int getCodepoint(MultiGapBuffer *buffer, MGB_Iterator it, char32_t *code_point)
 {
 	pushRight(buffer, &it);
 	int max_read = buffer->blocks.start[it.block_index].length - it.sub_index;
 	return codepoint_read(getCharacter(buffer, it), max_read, (uint32_t *)code_point);
+}
+
+bool codepoint_next(MultiGapBuffer *buffer, MGB_Iterator *it, char32_t *codepoint)
+{
+	int read = getCodepoint(buffer, *it, codepoint);
+	MoveIterator(buffer,it, read); 
+	return read;
 }
 
 char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)

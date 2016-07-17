@@ -59,22 +59,31 @@ internal void freeBufferedCharacters();
 
 internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 {
+	
+	//either us or move caret to X have some sort of problem (all or just high unicode stuff?)
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
+	float scale = scaleFromLine(textBuffer, getLineFromIterator(textBuffer, it));
+	int initial_byte_pos = 0;
+	for (;;)
+	{
+		if (!MoveIterator(mgb, &it, -1))break;
+		++initial_byte_pos;
+		if (isLineBreak(*getCharacter(mgb, it))) break;
+	}
+	
+	char32_t codepoint_a, codepoint_b;
+	int ack = getCodepoint(mgb, it, &codepoint_a);
+	MoveIterator(mgb, &it, ack);
+	int read;
 	int x_ack = 0;
-	char prev = *getCharacter(mgb, it);
-	prev = prev ? prev : ' ';
-	while (getPrev(mgb, &it)) {
-		char c = *getCharacter(mgb, it);
-		if (!c)break;
-		if (isLineBreak(c))
-		{
-			break;
-		}
-		else
-		{
-			x_ack += getCharacterWidth(it, textBuffer, textBuffer->font, scaleFromLine(textBuffer, getLineFromIterator(textBuffer, it)));
-			prev = c;
-		}
+	while (ack < initial_byte_pos)
+	{
+		read = getCodepoint(mgb, it, &codepoint_b);
+		if (!read)break;
+		ack += read;
+		x_ack += getCharacterWidth(textBuffer, it, codepoint_a, codepoint_b, textBuffer->font, scale);
+		MoveIterator(mgb, &it, read);
+		codepoint_a = codepoint_b;
 	}
 	return x_ack;
 }
@@ -132,32 +141,30 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 	int x = 0;
 	int dx = 0;
 
-	//@clean me up
-	// this move left move right crap is so that we're easily getting the next character
-	// it's hacky as hell. I'll need to fix this at some point. not sure it'll look better with the current infrastructure though...
-	// are we sure that we shouldn't log this??
-	
-	//FUCKING ALSO THIS DOENS'T WORK WITH UNICODE
-	if (!move_nc(textBuffer, dir_right, caretIdIndex, no_log, selection, movemode_codepoint))
-		return;
-
-	while (1)
+	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
+	MGB_Iterator it = getIteratorFromCaret(mgb, caretId);
+	char32_t codepoint_a,codepoint_b;
+	int ack = 0;
+	getCodepoint(mgb,it,&codepoint_a);
+	MoveIterator(mgb, &it, ack);
+	int read;
+	while ((read = getCodepoint(mgb, it, &codepoint_b)))
 	{
-		MGB_Iterator it = getIteratorFromCaret(textBuffer->backingBuffer->buffer, caretId);
-		getPrev(textBuffer->backingBuffer->buffer, &it);
-		dx = getCharacterWidth(it, textBuffer, textBuffer->font, scale);
+		MoveIterator(mgb, &it, read);
+		dx = getCharacterWidth(textBuffer, it, codepoint_a, codepoint_b, textBuffer->font, scale);
 
-		if (abs(x - targetX) < abs((x + dx) - targetX) || isLineBreak(*get(textBuffer->backingBuffer->buffer, caretId, dir_left)))
+		if (abs(x - targetX) < abs((x + dx) - targetX)||isLineBreak(codepoint_b))
 		{
 			break;
 		}
 
-		x += dx;
+		ack += read;
 
-		if (!move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection,movemode_codepoint))
-			return;
+		x += dx;
+		codepoint_a = codepoint_b;
 	}
-	move_nc(textBuffer, dir_left, caretIdIndex, no_log, selection, movemode_codepoint);
+	for (int i = 0; i < ack;i++)
+		move_nc(textBuffer, dir_right, caretIdIndex, no_log, selection, movemode_byte);
 }
 
 
@@ -243,7 +250,7 @@ internal void redoLineSumTree(BackingBuffer *backingBuffer)
 	int read;
 	do {
 		char32_t codepoint;
-		read = getCodePoint(backingBuffer->buffer, it, &codepoint);
+		read = getCodepoint(backingBuffer->buffer, it, &codepoint);
 		counter += read;
 		if (isLineBreak(codepoint))
 		{
@@ -611,12 +618,12 @@ internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direct
 
 	if (dir == dir_left)
 	{
-		MoveIterator(mgb,&it,-bytes_of_codepoint(cursorId, mgb, dir));
-		ack += getCodePoint(mgb, it, &codepoint_a);
+		if(!MoveIterator(mgb,&it,-bytes_of_codepoint(cursorId, mgb, dir)))return 0;
+		ack += getCodepoint(mgb, it, &codepoint_a);
 		for (;;)
 		{
 			if (!MoveIterator(mgb, &it, -bytes_of_codepoint(cursorId, mgb, dir)))return ack;
-			int read = getCodePoint(mgb, it, &codepoint_b);
+			int read = getCodepoint(mgb, it, &codepoint_b);
 			if(can_break_grapheme_cluster(codepoint_b, codepoint_a))return ack;
 			else {
 				ack += read;
@@ -627,11 +634,11 @@ internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direct
 	else //dir_right
 	{
 		assert(dir == dir_right);
-		ack += getCodePoint(mgb, it, &codepoint_a);
+		ack += getCodepoint(mgb, it, &codepoint_a);
 		for (;;)
 		{
 			if (!MoveIterator(mgb, &it, bytes_of_codepoint(cursorId, mgb, dir)))return ack;
-			int read = getCodePoint(mgb, it, &codepoint_b);
+			int read = getCodepoint(mgb, it, &codepoint_b);
 			if (can_break_grapheme_cluster(codepoint_a, codepoint_b)) return ack;
 			else {
 				ack += read;
@@ -832,7 +839,7 @@ internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdInd
 	if (targetLine >= 0 && targetLine < getLines(textBuffer->backingBuffer))
 	{
 		gotoStartOfLine(textBuffer, targetLine, selection, caretIdIndex);
-		//moveCaretToX(textBuffer, getPreferedCaretX(textBuffer,caretIdIndex), selection, caretIdIndex);
+		moveCaretToX(textBuffer, getPreferedCaretX(textBuffer,caretIdIndex), selection, caretIdIndex);
 	}
 }
 internal void moveUp_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex) //handle selecitons
@@ -973,7 +980,7 @@ internal int getCharacterWidth_std(char32_t currentChar, char32_t nextChar, Type
 struct MGB_Iterator; //bacuse vs don't know how to highlight otherwise..
 
 
-internal int getCharacterWidth(MGB_Iterator it, TextBuffer *buffer, Typeface::Font *typeface, float scale)
+internal int getCharacterWidth(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char,  Typeface::Font *font, float scale)
 {
 	//currently about O(to fucking much). I'm just fucking lazy though. (I don't memoize anything)
 	MultiGapBuffer *mgb= buffer->backingBuffer->buffer;
@@ -983,14 +990,14 @@ internal int getCharacterWidth(MGB_Iterator it, TextBuffer *buffer, Typeface::Fo
 	{
 		if (buffer->contextCharWidthHook.start[i].character== current)
 		{
-			return buffer->contextCharWidthHook.start[i].func(it, buffer, typeface, scale);
+			return buffer->contextCharWidthHook.start[i].func(buffer,it, current_char, next_char, font, scale);
 		}
 	}
 	
 	current = current ? current : 'A';
 	getNext(buffer->backingBuffer->buffer, &it);
 	char next = *getCharacter(buffer->backingBuffer->buffer, it);
-	return getCharacterWidth_std(current, next, typeface, scale);
+	return getCharacterWidth_std(current, next, font, scale);
 }
 
 
@@ -1014,19 +1021,22 @@ FileEncoding recognize_file_encoding(void *start, size_t len, size_t *_out_lengt
 	
 	*_out_length_as_utf8 = utf32toutf8((uint32_t *)start, len, 0, 0, &error);
 	if (error == UTF8_ERR_NONE) { return file_encoding_utf32; }
+	return file_encoding_unknown;
 }
 
-//this is some propper bad code... we need to clean this up. el prono. (but I do think it kinda works) littered with gotos though. 
+
 void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 {
-	// FAILURE NOT HANDLED! //@CLEANUP CLEAN ME UPP
+	
 	HANDLE file_handle = CreateFileW(DHSTR_WCHART_FROM_STRING(string,alloca), GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 	LARGE_INTEGER lisize = {};
-	bool success = GetFileSizeEx(file_handle, &lisize);
+	if (!file_handle)goto cleanup_file_handle;
+	if (!GetFileSizeEx(file_handle, &lisize)) goto cleanup_file_handle;
 	uint64_t file_size = (uint64_t)lisize.QuadPart;
 	HANDLE mapping_handle = CreateFileMapping(file_handle, 0, PAGE_READONLY | SEC_COMMIT, 0, 0, 0);
+	if (!mapping_handle)goto cleanup_mapping_handle;
 	char *file_start = (char *)MapViewOfFile(mapping_handle, FILE_MAP_READ, 0, 0, 0);
-	if (file_start == 0)return; //???
+	if (!file_start)goto cleanup_view;
 
 	uint64_t buffer_size;
 	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
@@ -1037,7 +1047,8 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 	growTo(buffer->backingBuffer->buffer, needed_size*2);
 
 	char *buffer_write_start = mgb->start;
-	size_t buffer_max_write = mgb->length;
+	size_t buffer_max_write = needed_size;
+	//@fixme, cursor should be at start.
 	switch (encoding)
 	{
 		int32_t errors;
@@ -1060,10 +1071,17 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 	
 	buffer->backingBuffer->buffer->blocks.start[0].length = needed_size;
 	buffer->backingBuffer->buffer->blocks.start[0].start = 0;
+
+cleanup_view:
 	UnmapViewOfFile(file_start);
+cleanup_mapping_handle:
 	CloseHandle(mapping_handle);
+cleanup_file_handle:
 	CloseHandle(file_handle);
 }
+
+
+
 
 internal bool openFile(TextBuffer *textBuffer, DHSTR_String fileName)
 {
@@ -2279,11 +2297,10 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
 
 			char32_t codepoint;
-			int read = getCodePoint(mgb, it, &codepoint);
+			int read = getCodepoint(mgb, it, &codepoint);
 			ended = !MoveIterator(mgb, &it, read);
 			
 			bool lineBreak= isLineBreak(codepoint);
-
 
 			{
 				MGB_Iterator q = {};
@@ -2293,8 +2310,9 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				getPrev(textBuffer->backingBuffer->buffer, &q);
 				//int width = getCharacterWidth(q, textBuffer, rendering.typeface, rendering.scale);
 				int width = 0;
-				if (last_codepoint != 0)
+				if (last_codepoint != 0){
 					width = getCharacterWidth_std(last_codepoint, codepoint, rendering.typeface, rendering.scale);
+				}
 				if (selection)
 				{//lol we're effectively done in the next iteration.. :/
 					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.typeface->ascent*rendering.scale, (width + 2) / 3, rendering.typeface->lineHeight*rendering.scale, highlightColor);

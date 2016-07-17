@@ -784,7 +784,6 @@ struct Locator
 	int line;
 	int pos;
 };
-internal int elasticTab(MGB_Iterator it, TextBuffer *buffer, Typeface::Font *font, float scale);
 
 unsigned int hash_loc(Locator loc)
 {
@@ -796,7 +795,8 @@ unsigned int locator_equality(Locator a, Locator b)
 }
 DEFINE_HashTable(Locator, int, hash_loc, locator_equality);
 
-internal int elasticTab(MGB_Iterator it, TextBuffer *buffer, Typeface::Font *font, float scale)
+
+internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char, Typeface::Font *typeface, float scale)
 {
 	BindingIdentifier ident = { 0,&elasticTab };
 	void **memoPtr;
@@ -902,7 +902,7 @@ next:
 		}
 	}
 end:
-	int ret = max_w - our_w + getCharacterWidth_std('\t', ' ', font, scale);
+	int ret = max_w - our_w + getCharacterWidth_std('\t', ' ', typeface, scale);
 	insert(memo, loc, ret);
 	return ret;
 }
