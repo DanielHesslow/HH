@@ -11,26 +11,26 @@ The memory handling stuff is completely shit.
 I'll have to think about moving back to a basic malloc. (+ debug)
 
 The features that are neccessary:
-[x] unicode support
-[x] multiple buffers
-[x] multiple cursors
-[x] subpixel font-rendering 
-[x] copy paste
-[ ] color markdown
-[ ] customization
-[ ] intellisence
-[ ] search (file / folder / selection)
-[ ] page up / down
+- [x] unicode support
+- [x] multiple buffers
+- [x] multiple cursors
+- [x] subpixel font-rendering 
+- [x] copy paste
+- [ ] color markdown
+- [ ] customization
+- [ ] intellisence
+- [ ] search (file / folder / selection)
+- [ ] page up / down
 
 At somepoint
-[ ] csi mode  
-[ ] networked mode
-[ ] multiple files single buffer mode
+- [ ] csi mode  
+- [ ] networked mode
+- [ ] multiple files single buffer mode
 
 
 Ports:
-[x] Windows
-[ ] Mac
-[ ] Linux
+- [x] Windows
+- [ ] Mac
+- [ ] Linux
 
 
