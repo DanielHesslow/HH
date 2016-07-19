@@ -427,6 +427,7 @@ internal bool hasOkExtension(DHSTR_String file_name)
 		DHSTR_MAKE_STRING(".hpp"),
 		DHSTR_MAKE_STRING(".txt"),
 		DHSTR_MAKE_STRING(".bat"),
+		DHSTR_MAKE_STRING(".md"),
 	};
 	
 	for (int i = 0; i < ARRAY_LENGTH(extensions); i++)

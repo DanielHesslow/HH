@@ -4,7 +4,6 @@ The goal is to be able to move from visual studio to this.
 Currently it's nowhere near that goal.
 
 Most importantly it needs to be 100% reliable.
-now for example we insert \r before \n evey time getting \r\r\r\n after two saves.
 
 We need to reintroduce the lexer. Maybe as it's own self contained 'plugin'
 The memory handling stuff is completely shit.
@@ -21,6 +20,7 @@ The features that are neccessary:
 - [ ] intellisence
 - [ ] search (file / folder / selection)
 - [ ] page up / down
+- [ ] handle \r\n lineenindgs correctly and use the one that is in the file unless specified otherwise. (maybe normalize as well if it differs)
 
 At somepoint
 - [ ] csi mode  
@@ -34,3 +34,6 @@ Ports:
 - [ ] Linux
 
 
+Known Bugs:
+if given file does not exsit we fail.
+\r\n renders as double line breaks. This is not ok.
