@@ -140,6 +140,13 @@ int length_of_block(MultiGapBuffer *buffer, int index)
 	return buffer->blocks.start[index].length;
 }
 
+char *start_of_block(MultiGapBuffer *buffer, int index)
+{
+	return &buffer->start[buffer->blocks.start[index].start];
+}
+
+
+
 // push the iterator to the right-most 'same' position. 
 // returns false if there is no character to the right, true otherwise
 bool pushRight(MultiGapBuffer *buffer, MGB_Iterator *it)
@@ -159,7 +166,7 @@ bool pushLeft(MultiGapBuffer *buffer, MGB_Iterator *it)
 	while (it->sub_index <=0)
 	{
 		if (it->block_index == 0)return false;
-		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)+it->sub_index};
+		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)+it->sub_index-1};
 	}
 	return true;
 }

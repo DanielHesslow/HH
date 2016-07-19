@@ -814,24 +814,9 @@ internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_ch
 	HistoryEntry event;
 	while (next_history_change(buffer->backingBuffer,&elasticTab,&event)) 
 	{
-		if (event.action != action_move)//clear hashmap
-		{
-			dprs("clear hashmap");
-			
-			HashBucket_Locator_int empty_bucket;
-			empty_bucket.state = bucket_state_empty;
-
-			for (int i = 0; i < memo->capacity; i++)
-			{
-				memo->buckets[i] = empty_bucket;
-			}
-			memo->length = 0;
-			
+		if (event.action != action_move){
+			clear(memo);
 			break;
-		}
-		else
-		{
-			dprs("don't clear,  just a move ");
 		}
 	}
 	
@@ -844,8 +829,12 @@ internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_ch
 	{
 		char c = *getCharacter(mgb, it);
 		if (isLineBreak(c)) { break; }
-		if (c == '\v') { ++tab_num; }
+		if (c == '\v') 
+		{ 
+			++tab_num; 
+		}
 	}
+	assert(tab_num == 0);
 	Locator loc;
 	loc.line = getLineFromIterator(buffer, itstart);
 	loc.pos = tab_num;

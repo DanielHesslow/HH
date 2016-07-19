@@ -435,7 +435,6 @@ void remove(HashTable_##key_type##_##value_type *hashtable, key_type key, bool *
 }\
 void clear(HashTable_##key_type##_##value_type *hashtable)\
 {\
-	assert(HT_count(hashtable) == hashtable->length && "clear early");\
 	HashBucket_##key_type##_##value_type empty_bucket;\
 	empty_bucket.state = bucket_state_empty;\
 \
@@ -443,7 +442,6 @@ void clear(HashTable_##key_type##_##value_type *hashtable)\
 	{\
 		hashtable->buckets[i] = empty_bucket;\
 	}\
-	assert(HT_count(hashtable) == hashtable->length && "clear late");\
 	hashtable->length = 0;\
 }
 // if we have a rather big array and want to have some data on a small amount of those elements

@@ -1,5 +1,6 @@
 #ifndef WIN32H
 #define WIN32H
+float QueryFrameUsed();
 #include "texteditor.hpp"
 
 struct win32WindowDimensions

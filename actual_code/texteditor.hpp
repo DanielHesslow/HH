@@ -1018,14 +1018,15 @@ FileEncoding recognize_file_encoding(void *start, size_t len, size_t *_out_lengt
 }
 
 
-void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
+bool openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 {
-	
+	bool success = false;
 	HANDLE file_handle = CreateFileW(DHSTR_WCHART_FROM_STRING(string,alloca), GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 	LARGE_INTEGER lisize = {};
 	if (!file_handle)goto cleanup_file_handle;
 	if (!GetFileSizeEx(file_handle, &lisize)) goto cleanup_file_handle;
 	uint64_t file_size = (uint64_t)lisize.QuadPart;
+	if (!file_size) { success = true; goto cleanup_file_handle; } // file mappings don't like zero lenght files. but we have allready 'opened' it is it's fine... 
 	HANDLE mapping_handle = CreateFileMapping(file_handle, 0, PAGE_READONLY | SEC_COMMIT, 0, 0, 0);
 	if (!mapping_handle)goto cleanup_mapping_handle;
 	char *file_start = (char *)MapViewOfFile(mapping_handle, FILE_MAP_READ, 0, 0, 0);
@@ -1033,44 +1034,52 @@ void openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 
 	uint64_t buffer_size;
 	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
+	__try {
+		size_t needed_size;
+		FileEncoding encoding = recognize_file_encoding(file_start, file_size, &needed_size);
+
+		growTo(buffer->backingBuffer->buffer, needed_size*2);
+
+		char *buffer_write_start = mgb->start;
+		size_t buffer_max_write = needed_size;
+
+		//@fixme, cursor should be at start.
+		switch (encoding)
+		{
+			int32_t errors;
+			case file_encoding_unknown:
+			case file_encoding_utf8:
+			{
+				memcpy(buffer_write_start, file_start, file_size);
+			}break;
+			case file_encoding_utf16:
+			{
+				utf16toutf8((const uint16_t *)file_start, file_size, buffer_write_start, buffer_max_write, &errors);
+				assert(!errors);
+			}break;
+			case file_encoding_utf32:
+			{
+				utf32toutf8((const uint32_t *)file_start, file_size, buffer_write_start, buffer_max_write, &errors);
+				assert(!errors);
+			}break;
+		}
 	
-	size_t needed_size;
-	FileEncoding encoding = recognize_file_encoding(file_start, file_size, &needed_size);
-
-	growTo(buffer->backingBuffer->buffer, needed_size*2);
-
-	char *buffer_write_start = mgb->start;
-	size_t buffer_max_write = needed_size;
-	//@fixme, cursor should be at start.
-	switch (encoding)
-	{
-		int32_t errors;
-		case file_encoding_unknown:
-		case file_encoding_utf8:
-		{
-			memcpy(buffer_write_start, file_start, file_size);
-		}break;
-		case file_encoding_utf16:
-		{
-			utf16toutf8((const uint16_t *)file_start, file_size, buffer_write_start, buffer_max_write, &errors);
-			assert(!errors);
-		}break;
-		case file_encoding_utf32:
-		{
-			utf32toutf8((const uint32_t *)file_start, file_size, buffer_write_start, buffer_max_write, &errors);
-			assert(!errors);
-		}break;
+		buffer->backingBuffer->buffer->blocks.start[0].length = needed_size;
+		buffer->backingBuffer->buffer->blocks.start[0].start = 0;
+		success = true;
 	}
-	
-	buffer->backingBuffer->buffer->blocks.start[0].length = needed_size;
-	buffer->backingBuffer->buffer->blocks.start[0].start = 0;
-
+	__except (GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+	{
+		// do shit all I guess??
+		dprs("failed to read from file, page_error");
+	}
 cleanup_view:
 	UnmapViewOfFile(file_start);
 cleanup_mapping_handle:
 	CloseHandle(mapping_handle);
 cleanup_file_handle:
 	CloseHandle(file_handle);
+	return success;
 }
 
 
@@ -1079,8 +1088,7 @@ cleanup_file_handle:
 internal bool openFile(TextBuffer *textBuffer, DHSTR_String fileName)
 {
 	//Failure Point
-	openFile_mapping(textBuffer, fileName);
-	return true;
+	return openFile_mapping(textBuffer, fileName);
 	//platform dependant. REFACTOR / MOVE 
 	//silly stupid slow method..
 	//fix this at some point?-
@@ -1529,23 +1537,21 @@ internal void getFileWriteTime_PLATFORM(char *fileName)
 	GetFileTime(hFile, 0, 0, fileTime);
 }
 
-internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String fileName)
-{
-	//Failure Point
 
-	FILE *file;
-	file = _wfopen(DHSTR_WCHART_FROM_STRING(fileName, alloca), L"w");
+
+internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String path)
+{
+
+	FILE *file = _wfopen(DHSTR_WCHART_FROM_STRING(path, alloca), L"w");
+
 	if (file)
 	{
-		MGB_Iterator it = getIterator(buffer);
-		
-		do{
-			if (fputc(*getCharacter(buffer,it), file) == EOF){
-				break;
-			}
-		} while (getNext(buffer, &it));
-		fclose(file);
+		for (int i = 0; i < buffer->blocks.length; i++)
+			if (buffer->blocks.length != 0)
+				fwrite(start_of_block(buffer,i), sizeof(char), length_of_block(buffer,i), file);
 	}
+
+	fclose(file);
 }
 
 
@@ -1889,43 +1895,38 @@ long long unsigned int charBitmapIdentifier(float scale, int codepoint)
 	return codepoint | int_scale;
 }
 
-internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *font)
+
+CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 {
-	stbtt_fontinfo *font_info = font->font_info;
 	int xOff, yOff;
-	bool found = false;
-	long long unsigned int ident = charBitmapIdentifier(scale,codepoint);
-	CharBitmap *lookedup;
-	if(lookup(&font->cachedBitmaps, ident, &lookedup)) 
-	{
-		return *lookedup;
-	}
+
 	int glyph_index = getGlyph(font, codepoint);
+	stbtt_fontinfo *font_info = font->font_info;
 
 	//stride's additional 2 comes from where exactey, hadn't we allready taken that into account?
 	int width, height;
-	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale*3, scale, glyph_index, &width, &height, &xOff, &yOff);
+	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale * 3, scale, glyph_index, &width, &height, &xOff, &yOff);
 	float die_off = 1.2; // [1.5,2]
 	float intensity = 1;
-	float subpix_bleed[] = { .5f * intensity / 3, .5f *die_off *intensity / 3 , .5f *intensity/ (3 * die_off)};
+	float subpix_bleed[] = { .5f * intensity / 3, .5f *die_off *intensity / 3 , .5f *intensity / (3 * die_off) };
 
 	int bleed_extra_per_row = ciel_divide((ARRAY_LENGTH(subpix_bleed) - 1) * 2, 3);
-	int color_stride = (ciel_divide(width+2, 3) + bleed_extra_per_row)+1;
+	int color_stride = (ciel_divide(width + 2, 3) + bleed_extra_per_row) + 1;
 
-	uint8_t *new_mem = (uint8_t *) alloc_(color_stride*3*height, "character bitmap");
-	memset(new_mem, 0, color_stride*3*height);
+	uint8_t *new_mem = (uint8_t *)alloc_(color_stride * 3 * height, "character bitmap");
+	memset(new_mem, 0, color_stride * 3 * height);
 	uint8_t *row_from = (uint8_t *)charBitmapMem;
-	uint8_t *colors[3] = 
+	uint8_t *colors[3] =
 	{
 		new_mem,
-		new_mem + color_stride * height, 
-		new_mem + color_stride * height * 2 
+		new_mem + color_stride * height,
+		new_mem + color_stride * height * 2
 	};
 
-	for (int y = 0; y < height; y++) 
+	for (int y = 0; y < height; y++)
 	{
 		uint8_t *pix_from = row_from;
-		
+
 		for (int x = 0; x < width; x++)
 		{
 			//colors[x % 3][x/3 + y*color_stride+1] += *pix_from * subpix_bleed[0];
@@ -1942,20 +1943,39 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 		}
 		row_from += width;
 	}
-	
+
 	free_(charBitmapMem);
 	CharBitmap b = {};
 	b.character = codepoint;
 	b.scale = scale;
 	b.yOff = yOff;
-	b.xOff = xOff; 
+	b.xOff = xOff;
 	b.height = height;
-	b.width= color_stride-1;
+	b.width = color_stride - 1;
 	b.colorStride = color_stride;
 	b.memory = new_mem;
-	
+
 	insert(&font->cachedBitmaps, charBitmapIdentifier(scale, codepoint), b);
 	return b;
+}
+
+internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *font)
+{
+	bool found = false;
+	long long unsigned int ident = charBitmapIdentifier(scale,codepoint);
+	CharBitmap *lookedup;
+	if(lookup(&font->cachedBitmaps, ident, &lookedup)) 
+	{
+		return *lookedup;
+	}
+	
+	// if we try to load a ton of unicode stuff it's way better to not render every char than to choke.
+	// at some point we might want to go multithreaded
+	// however this is not an unicode editor, it an editor with unicode support.
+	if (QueryFrameUsed() > .8f)
+		return {};
+	else
+		return loadBitmap(codepoint, scale, font); 
 }
 
 
@@ -2290,21 +2310,17 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
 
 			char32_t codepoint;
+			MGB_Iterator prev_it = it;
+
 			int read = getCodepoint(mgb, it, &codepoint);
 			ended = !MoveIterator(mgb, &it, read);
 			
 			bool lineBreak= isLineBreak(codepoint);
 
 			{
-				MGB_Iterator q = {};
-				q.block_index = it.block_index;
-				q.sub_index = it.sub_index;
-
-				getPrev(textBuffer->backingBuffer->buffer, &q);
-				//int width = getCharacterWidth(q, textBuffer, rendering.typeface, rendering.scale);
 				int width = 0;
 				if (last_codepoint != 0){
-					width = getCharacterWidth(textBuffer,it,last_codepoint, codepoint, rendering.typeface, rendering.scale);
+					width = getCharacterWidth(textBuffer,prev_it,last_codepoint, codepoint, rendering.typeface, rendering.scale);
 				}
 				if (selection)
 				{//lol we're effectively done in the next iteration.. :/

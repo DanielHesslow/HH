@@ -424,18 +424,33 @@ internal bool charDown(int character, Input *input)
 	return true;
 }
 
+
 uint64_t frequency;
 
 internal uint64_t get_MicroSeconds_Since(uint64_t previousTimeStamp, uint64_t *currentTime)
 {	//frequency better be setup!
 	LARGE_INTEGER timeStamp_li;
 	QueryPerformanceCounter(&timeStamp_li);
-	*currentTime = timeStamp_li.QuadPart;
-	return (*currentTime - previousTimeStamp) / (frequency / 1000000);
+	if(currentTime)
+		*currentTime = timeStamp_li.QuadPart;
+	return (timeStamp_li.QuadPart - previousTimeStamp) / (frequency / 1000000);
 }
 
+
+
+
+uint64_t previousTimeStamp;
 uint64_t MicorSeconds_Since_StartUP; //should not overflow... but let's not rely on us.
 uint64_t getMicros() { return MicorSeconds_Since_StartUP; }
+
+int targetFrameWait = 16667;
+
+float QueryFrameUsed()
+{
+	uint64_t timePassed = get_MicroSeconds_Since(previousTimeStamp, 0);
+	return (float)timePassed / (float)targetFrameWait;
+};
+
 int CALLBACK
 WinMain(HINSTANCE instance,
 		HINSTANCE prevInstance,
@@ -455,8 +470,8 @@ WinMain(HINSTANCE instance,
 	QueryPerformanceFrequency(&li);
 	frequency = li.QuadPart;
 	QueryPerformanceCounter(&li);
+	previousTimeStamp = li.QuadPart;
 
-	uint64_t previousTimeStamp = li.QuadPart;
 	uint64_t previousTimeStamp_2 = li.QuadPart;
 
 	HANDLE iconSmall = LoadImage(NULL, "icon.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
@@ -584,14 +599,12 @@ WinMain(HINSTANCE instance,
 			uint64_t timePassed = get_MicroSeconds_Since(previousTimeStamp,&timeStamp);
 			MicorSeconds_Since_StartUP += timePassed;
 			
-			int targetFrameWait = 16667;
 			if (timePassed < targetFrameWait)
 			{
-				Sleep((targetFrameWait - timePassed)/1000);
+				Sleep((targetFrameWait - timePassed)/1000); // erm system clock is 15,6ms. which is waaaay to much. all our frames may wait between 0 and 15,6 ms. Which is way to much. 
 			}
 			
 			previousTimeStamp = timeStamp;
-
 		}
     }
 	return 0;

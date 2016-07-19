@@ -395,7 +395,7 @@ void logRemoveCaret(History *history, int pos_caret, int pos_selection, int care
 bool next_history_change(BackingBuffer *buffer, void *function, HistoryEntry *_out_event)
 { 
 	HistoryChangeTracker *change_tracker;
-	if (!lookup(&buffer->binding_next_change, function, &change_tracker))
+	if (!lookup(&buffer->binding_next_change, function, &change_tracker)) //huh stack overflow...
 	{
 		HistoryChangeTracker ch = {};
 		ch.next_index = 0;
@@ -423,7 +423,6 @@ bool next_history_change(BackingBuffer *buffer, void *function, HistoryEntry *_o
 			return true;
 		}
 	}	
-
 	
 	if (change_tracker->next_index < buffer->history.change_log.length)
 	{
@@ -435,7 +434,6 @@ bool next_history_change(BackingBuffer *buffer, void *function, HistoryEntry *_o
 		*_out_event = reference.type == HistoryChange_do ? change_tracker->prev_entry : invert_event(change_tracker->prev_entry);
 		return true;
 	}
-	
 	
 	_out_event = (HistoryEntry *)0; // if somebody illegally tries to deref this having this be null is the best course of action
 	return false;
