@@ -166,7 +166,7 @@ bool pushLeft(MultiGapBuffer *buffer, MGB_Iterator *it)
 	while (it->sub_index <=0)
 	{
 		if (it->block_index == 0)return false;
-		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)+it->sub_index-1};
+		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)+it->sub_index};
 	}
 	return true;
 }

@@ -75,17 +75,20 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 
 	char32_t codepoint_a, codepoint_b;
 	int ack = getCodepoint(mgb, it, &codepoint_a);
+	MGB_Iterator prev_it = it;
 	MoveIterator(mgb, &it, ack);
 	int read;
 	int x_ack = 0;
 	while (ack <= initial_byte_pos)
 	{
+		MGB_Iterator tmp = it;
 		read = getCodepoint(mgb, it, &codepoint_b);
 		if (!read)break;
 		ack += read;
-		x_ack += getCharacterWidth(textBuffer, it, codepoint_a, codepoint_b, textBuffer->font, scale);
+		x_ack += getCharacterWidth(textBuffer, prev_it, codepoint_a, codepoint_b, textBuffer->font, scale);
 		MoveIterator(mgb, &it, read);
 		codepoint_a = codepoint_b;
+		prev_it = tmp;
 	}
 	return x_ack;
 }
@@ -149,16 +152,19 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 	int a_read_len = getCodepoint(mgb,it,&codepoint_a);
 	int b_read_len;
 	int ack = 0;
+	MGB_Iterator prev_it = it;
 	MoveIterator(mgb, &it, a_read_len);
 	while ((b_read_len = getCodepoint(mgb, it, &codepoint_b)))
 	{
+		MGB_Iterator pit = it;
 		MoveIterator(mgb, &it, b_read_len);
-		dx = getCharacterWidth(textBuffer, it, codepoint_a, codepoint_b, textBuffer->font, scale);
+		dx = getCharacterWidth(textBuffer, prev_it, codepoint_a, codepoint_b, textBuffer->font, scale);
 		if (abs(x - targetX) < abs((x + dx) - targetX)||isLineBreak(codepoint_a)) break;
 		ack += a_read_len;
 		x += dx;
 		codepoint_a = codepoint_b;
 		a_read_len = b_read_len;
+		prev_it = pit;
 	}
 	for (int i = 0; i < ack;i++)
 		move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection, movemode_byte);
@@ -986,6 +992,9 @@ internal int getCharacterWidth(TextBuffer *buffer, MGB_Iterator it, char32_t cur
 	{
 		if (buffer->contextCharWidthHook.start[i].character == current_char)
 		{
+			char32_t acp;
+			getCodepoint(mgb, it, &acp);
+			assert(acp == current_char);
 			return buffer->contextCharWidthHook.start[i].func(buffer,it, current_char, next_char, font, scale);
 		}
 	}
@@ -2302,6 +2311,8 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 
 	bool selection = false;
+	MGB_Iterator prev_it;
+
 	if (length(textBuffer->backingBuffer->buffer))
 	{
 		while (!ended)
@@ -2310,7 +2321,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
 
 			char32_t codepoint;
-			MGB_Iterator prev_it = it;
+			MGB_Iterator pit = it;
 
 			int read = getCodepoint(mgb, it, &codepoint);
 			ended = !MoveIterator(mgb, &it, read);
@@ -2359,7 +2370,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				rendering.x = orgX;
 				codepoint = 0;
 			}
-
+			prev_it = pit;
 			last_codepoint = codepoint;
 		}
 	}
