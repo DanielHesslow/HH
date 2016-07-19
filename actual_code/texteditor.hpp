@@ -1550,9 +1550,12 @@ internal void getFileWriteTime_PLATFORM(char *fileName)
 
 internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String path)
 {
-
-	FILE *file = _wfopen(DHSTR_WCHART_FROM_STRING(path, alloca), L"w");
-
+	// so the b below is for binary.
+	// 'but we're writing text right?'
+	// yea but windows enjoys substituting \n with \r\n
+	// which we don't like to do. if we like to change the line endings well fucking change the line endings
+	// this should fix the bug with increasing amount of lineenings.
+	FILE *file = _wfopen(DHSTR_WCHART_FROM_STRING(path, alloca), L"wb");
 	if (file)
 	{
 		for (int i = 0; i < buffer->blocks.length; i++)

@@ -147,8 +147,8 @@ char *start_of_block(MultiGapBuffer *buffer, int index)
 
 
 
-// push the iterator to the right-most 'same' position. 
-// returns false if there is no character to the right, true otherwise
+// push the iterator to the right into a valid position.
+// returns false if no valid position to the right exist.
 bool pushRight(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
 	while (it->sub_index >= length_of_block(buffer, it->block_index))
@@ -159,16 +159,25 @@ bool pushRight(MultiGapBuffer *buffer, MGB_Iterator *it)
 	return true;
 }
 
-// push the iterator to the left-most same position 
-// returns false if there is no character to the left, true otherwise
+// push the iterator to the left into a valid position.
+// returns false if no valid position to the left exist.
 bool pushLeft(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
-	while (it->sub_index <=0)
+	while (it->sub_index < 0)  
 	{
 		if (it->block_index == 0)return false;
 		*it = { it->block_index - 1, length_of_block(buffer, it->block_index-1)+it->sub_index};
 	}
 	return true;
+}
+
+// pushes an iterator into a valid postion, either to the right or to the left. Returns false if not possible.
+bool pushValid(MultiGapBuffer *buffer, MGB_Iterator *it)
+{
+	bool l = pushLeft(buffer, it);
+	bool r = pushRight(buffer, it);
+	assert((!r && !l) || r);
+	return r;
 }
 
 
