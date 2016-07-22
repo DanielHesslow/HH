@@ -437,25 +437,6 @@ internal bool hasOkExtension(DHSTR_String file_name)
 	return false;
 }
 
-#if 0
-internal void renderMenu(char* string, DynamicArray_CommandInfo commands, Data *data)
-{
-	assert(stringToCompareAgainst == 0);
-	stringToCompareAgainst = string;
-	qsort(commands.start, commands.length, sizeof(CommandInfo), cmp);
-	stringToCompareAgainst = (char *)0;
-	
-	freeMenuItems(data);
-	for (int i = 0; i < min(100,commands.length); i++)
-	{
-		MenuItem item = {};
-		item.name = commands.start[i].name;
-		if(hasOkExtension(commands.start[i].name))
-			Add(&data->menu, item);
-	}
-}
-#endif 
-
 internal void bindCommand(char *name, void(*func)(Data *data, DHSTR_String restOfTheBuffer))
 {
 	CommandInfo commandInfo = {};

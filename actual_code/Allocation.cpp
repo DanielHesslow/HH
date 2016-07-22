@@ -39,16 +39,12 @@ void calcEffectivity()
 
 void *alloc_(size_t memorySize, void *allocationInfo, void *owner) 
 {
-	for (int i = 0; i < blocks.length-1; i++)
-	{	//just making sure that we don't have any overlapp
-		assert(blocks.start[i].start + blocks.start[i].length <= blocks.start[i + 1].start);
-	}
 	memorySize *= 2;
 	if (blocks.capacity <= blocks.length)
 	{
 		{	//we're not important. No need to bootstrap and stuff for a debug thing... Not yet anyway. 
-			blocks.capacity += 1024;									
-			void *p = malloc(sizeof(Allocation)*(blocks.length+1024)); 
+			blocks.capacity += 1024*1024;									
+			void *p = malloc(sizeof(Allocation)*(blocks.length+ 1024 * 1024));
 			memcpy(p, blocks.start, (blocks.length)*sizeof(Allocation));				
 			if (blocks.start)												
 				free(blocks.start); //fail every time... donno why..

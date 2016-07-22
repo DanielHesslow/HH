@@ -24,10 +24,14 @@ void platform_free_compat(void *mem, void *data) { platform_free(mem); }
 
 DH_Allocator platform_allocator = { platform_alloc_compat,platform_free_compat,0};
 
+#define ALLOC(allocator, bytes) Allocate(allocator,bytes,DHMA_LOCATION)
 void *Allocate(DH_Allocator allocator, size_t bytes_to_alloc, void *allocation_info)
 {
 	return allocator.alloc(bytes_to_alloc, allocation_info, allocator.data);
 }
+
+
+
 void DeAllocate(DH_Allocator allocator, void *mem)
 {
 	allocator.free(mem, allocator.data);
@@ -59,7 +63,6 @@ internal void freeBufferedCharacters();
 
 internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 {
-	
 	//either us or move caret to X have some sort of problem (all or just high unicode stuff?)
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 	float scale = scaleFromLine(textBuffer, getLineFromIterator(textBuffer, it));
@@ -262,6 +265,8 @@ internal void redoLineSumTree(BackingBuffer *backingBuffer)
 			counter = 0;
 		}
 	} while (MoveIterator(backingBuffer->buffer,&it,read));
+	backingBuffer->lines = line+1;
+	binsumtree_set(sum_tree, line++, counter);
 }
 
 internal void initLineSumTree(BackingBuffer *backingBuffer,DH_Allocator allocator)
@@ -273,9 +278,26 @@ internal void initLineSumTree(BackingBuffer *backingBuffer,DH_Allocator allocato
 
 internal int getLines(BackingBuffer *buffer)
 {
-	int len = binsumtree_get_length(&buffer->lineSumTree)+1;
-	return len;
+	HistoryEntry entry;
+	while (next_history_change(buffer, &getLines, &entry))
+	{
+		if (isLineBreak(entry.character))
+		{
+			switch (entry.action)
+			{
+			case action_undelete:
+			case action_add:
+				++buffer->lines;
+				break;
+			case action_delete:
+			case action_remove:
+				--buffer->lines;
+			}
+		}
+	}
+	return buffer->lines;
 }
+
 internal int getLine(TextBuffer *textBuffer, int pos)
 {
 	
@@ -294,10 +316,11 @@ internal int getLine(TextBuffer *textBuffer, int pos)
 				{
 					int leef_index;
 					if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
-					int len = sum_tree->start[leef_index];
-
-					binsumtree_set(sum_tree, entry.location.line, entry.location.column +1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?)
-					binsumtree_insert(sum_tree, entry.location.line+1, len-entry.location.column);
+					int length_of_current_line = sum_tree->start[leef_index];
+					int length_of_new_line = length_of_current_line - entry.location.column;
+					assert(length_of_new_line >= 0);
+					binsumtree_set(sum_tree, entry.location.line, entry.location.column +1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?) dude fuck \r\n, we don't have it. (removed on open file, (maybe) added on write file)
+					binsumtree_insert(sum_tree, entry.location.line+1, length_of_current_line-entry.location.column);
 				}
 				else
 				{
@@ -338,12 +361,14 @@ internal int getLine(TextBuffer *textBuffer, int pos)
 		}
 		
 	}
-	int res_index;
+	int res_index = -1;
 	if (!binsumtree_search(sum_tree, pos, &res_index))
 	{
 		res_index = binsumtree_get_length(sum_tree); //is this right???
 	}
-	return res_index;
+	int total_lines = getLines(textBuffer->backingBuffer);
+	if (res_index >= total_lines)return total_lines-1;
+	else return res_index;
 }
 
 internal int getLineStart(BackingBuffer *backingBuffer, int line)
@@ -389,7 +414,7 @@ internal float getCurrentScale(TextBuffer *textBuffer, int caretIndexId)
 internal bool isLineBreak(char32_t codepoint)
 {
 	// a vertical is not a linebreak btw.. (what does c say??)
-	return codepoint == 0x000A || codepoint == 0x000C || codepoint == 0x000D|| codepoint == 0x0085 || codepoint == 0x2028 || codepoint == 0x2029;
+	return codepoint == 0x000A || codepoint == 0x000C || codepoint == 0x000D || codepoint == 0x0085 || codepoint == 0x2028 || codepoint == 0x2029;
 }
 internal bool isVerticalTab(char c)
 {
@@ -613,15 +638,21 @@ internal bool can_break_grapheme_cluster(char32_t codepoint_a, char32_t codepoin
 }
 internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direction dir)
 {
+	return bytes_of_codepoint(cursorId, mgb, dir);
+	/*
 	char32_t codepoint_a = 0;
 	char32_t codepoint_b = 0;
 
 	int ack=0;
 	MGB_Iterator it = getIteratorFromCaret(mgb, cursorId);
 
-	if (dir == dir_left)
+	// DUDE THIS IS FUCKING WRONG... COMBINES CURSORS AND IDS AND IT DOESN*T FUCKING WORK DUDE.
+	// FUCKING FIX ME MAN
+	// WHO FUCKING WROTE THIS SHIT, MAN.
+	// FIRE EVERYONE.
+	if (dir == dir_left) //we're not dooing to good....
 	{
-		if(!MoveIterator(mgb,&it,-bytes_of_codepoint(cursorId, mgb, dir)))return 0;
+		if(MoveIterator(mgb,&it,-bytes_of_codepoint(cursorId, mgb, dir)))return 0;
 		ack += getCodepoint(mgb, it, &codepoint_a);
 		for (;;)
 		{
@@ -648,7 +679,8 @@ internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direct
 				codepoint_a = codepoint_b;
 			}
 		}
-	}
+}
+*/
 }
 
 
@@ -1026,36 +1058,39 @@ FileEncoding recognize_file_encoding(void *start, size_t len, size_t *_out_lengt
 	return file_encoding_unknown;
 }
 
+internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int initialHistoryEntrySize);
 
-bool openFile_mapping(TextBuffer *buffer, DHSTR_String string)
+internal bool openFileIntoNewBackingBuffer(BackingBuffer **_out_backingBuffer, DHSTR_String file_name)
 {
+	*_out_backingBuffer = (BackingBuffer *)0;
+	BackingBuffer *ret;
 	bool success = false;
-	HANDLE file_handle = CreateFileW(DHSTR_WCHART_FROM_STRING(string,alloca), GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-	LARGE_INTEGER lisize = {};
-	if (!file_handle)goto cleanup_file_handle;
-	if (!GetFileSizeEx(file_handle, &lisize)) goto cleanup_file_handle;
-	uint64_t file_size = (uint64_t)lisize.QuadPart;
-	if (!file_size) { success = true; goto cleanup_file_handle; } // file mappings don't like zero lenght files. but we have allready 'opened' it is it's fine... 
-	HANDLE mapping_handle = CreateFileMapping(file_handle, 0, PAGE_READONLY | SEC_COMMIT, 0, 0, 0);
-	if (!mapping_handle)goto cleanup_mapping_handle;
-	char *file_start = (char *)MapViewOfFile(mapping_handle, FILE_MAP_READ, 0, 0, 0);
-	if (!file_start)goto cleanup_view;
+	{
+		HANDLE file_handle = CreateFileW(DHSTR_WCHART_FROM_STRING(file_name, alloca), GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+		LARGE_INTEGER lisize = {};
+		if (!file_handle)goto cleanup_file_handle;
+		if (!GetFileSizeEx(file_handle, &lisize)) goto cleanup_file_handle;
+		uint64_t file_size = (uint64_t)lisize.QuadPart;
+		if (!file_size) { success = true; goto cleanup_file_handle; } // file mappings don't like zero lenght files. but we have allready 'opened' it is it's fine... 
+		HANDLE mapping_handle = CreateFileMapping(file_handle, 0, PAGE_READONLY | SEC_COMMIT, 0, 0, 0);
+		if (!mapping_handle)goto cleanup_mapping_handle;
+		char *file_start = (char *)MapViewOfFile(mapping_handle, FILE_MAP_READ, 0, 0, 0);
+		if (!file_start)goto cleanup_view;
 
-	uint64_t buffer_size;
-	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
-	__try {
-		size_t needed_size;
-		FileEncoding encoding = recognize_file_encoding(file_start, file_size, &needed_size);
+		uint64_t buffer_size;
+		__try {
+			size_t needed_size;
+			FileEncoding encoding = recognize_file_encoding(file_start, file_size, &needed_size);
 
-		growTo(buffer->backingBuffer->buffer, needed_size*2);
+			ret = allocBackingBuffer(needed_size*2, 200); // idk
+			MultiGapBuffer *mgb = ret->buffer;
+			char *buffer_write_start = mgb->start;
+			size_t buffer_max_write = needed_size;
 
-		char *buffer_write_start = mgb->start;
-		size_t buffer_max_write = needed_size;
-
-		//@fixme, cursor should be at start.
-		switch (encoding)
-		{
-			int32_t errors;
+			//@fixme, cursor should be at start.
+			switch (encoding)
+			{
+				int32_t errors;
 			case file_encoding_unknown:
 			case file_encoding_utf8:
 			{
@@ -1071,81 +1106,56 @@ bool openFile_mapping(TextBuffer *buffer, DHSTR_String string)
 				utf32toutf8((const uint32_t *)file_start, file_size, buffer_write_start, buffer_max_write, &errors);
 				assert(!errors);
 			}break;
+			}
+
+			mgb->blocks.start[0].length = needed_size;
+			mgb->blocks.start[0].start = 0;
+			success = true;
 		}
-	
-		buffer->backingBuffer->buffer->blocks.start[0].length = needed_size;
-		buffer->backingBuffer->buffer->blocks.start[0].start = 0;
-		success = true;
+		__except (GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+		{
+			// do shit all I guess??
+			//@Log (for real that is not to the cmd)
+			dprs("failed to read from file, page_error");
+			success = false;
+		}
+	cleanup_view:
+		UnmapViewOfFile(file_start);
+	cleanup_mapping_handle:
+		CloseHandle(mapping_handle);
+	cleanup_file_handle:
+		CloseHandle(file_handle);
 	}
-	__except (GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+
+	if (!success)
 	{
-		// do shit all I guess??
-		dprs("failed to read from file, page_error");
+		//@Log
+		return false;
 	}
-cleanup_view:
-	UnmapViewOfFile(file_start);
-cleanup_mapping_handle:
-	CloseHandle(mapping_handle);
-cleanup_file_handle:
-	CloseHandle(file_handle);
+	MultiGapBuffer *mgb = ret->buffer;
+
+	// lets just fix the windows lineendings & more the cursor to the begining.
+	// horrible code btw. but whateves.... for now
+	// this does run through the entire file once. which should be fine even if the file is huge. 
+	// as does the open thing btw. we might want to add a fast path for _hugh_ files. (ie. logfiles)
+	while (mgb_moveLeft(mgb, mgb->running_cursor_id)) 
+	{
+		// so the while here is just if somebody has fucked up good.
+		// \r\r\r\r\r\r\n is _most likely_  just somebody mis-using the crt on windows.
+		// fyi crt on windows automatically writes \n as \r\n so if you try to write \r\n you get \r\r\n
+		// for example if you're not using crt to read the file and do use it to write it out.
+
+		while(*get(mgb, mgb->running_cursor_id, dir_left) == '\r'
+			&& *get(mgb, mgb->running_cursor_id, dir_right) == '\n')
+		{
+			removeCharacter(mgb, mgb->running_cursor_id);
+		}
+	}
+	// @cleanup relies on the fact that initial index is implicit.
+	DH_Allocator macro_used_allocator = ret->allocator;
+	ret->path = DHSTR_CPY(file_name, ALLOCATE);
+	*_out_backingBuffer = ret;
 	return success;
-}
-
-
-
-
-internal bool openFile(TextBuffer *textBuffer, DHSTR_String fileName)
-{
-	//Failure Point
-	return openFile_mapping(textBuffer, fileName);
-	//platform dependant. REFACTOR / MOVE 
-	//silly stupid slow method..
-	//fix this at some point?-
-	/*
-	int c;
-	FILE *file;
-	file = _wfopen((const wchar_t *)fileName, L"r");
-
-	if (file)
-	{
-		int len = 0;
-		while ((c = getc(file)) != EOF)
-		{
-			appendCharacter(textBuffer, c,0,false);
-			++len;
-		}
-		fclose(file);
-
-		for (int i = 0; i < len; i++)
-		{
-			move_nc(textBuffer,dir_left,0, no_log, no_select);
-		}
-
-		textBuffer->fileName = fileName;
-		return true;
-	}
-	return false;
-	*/
-}
-
-
-void attatch_BackingBuffer(TextBuffer *textBuffer, BackingBuffer *backingBuffer)
-{
-	++backingBuffer->ref_count;
-	textBuffer->backingBuffer = backingBuffer;
-}
-
-
-//obviously if you're going to change to which view the backingbuffer belongs attatch before you detatch, otherwise it'll be freed
-void detach_BackingBuffer(TextBuffer *textBuffer)
-{
-	BackingBuffer *backingBuffer= textBuffer->backingBuffer;
-	--backingBuffer->ref_count;
-	if (!backingBuffer->ref_count)
-	{
-		arena_deallocate_all(backingBuffer->allocator);
-	}
-	textBuffer->backingBuffer = (BackingBuffer *)0;
 }
 
 
@@ -1166,14 +1176,64 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 	buffer->buffer = stringBuffer;
 	buffer->bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
 	buffer->binding_next_change = DHDS_constructHT(PVOID, HistoryChangeTracker, 20, allocator);
+	buffer->ref_count = 0;
+	initLineSumTree(buffer, allocator);
 	return buffer;
 }
 
-DEFINE_HashTable(int, PVOID, silly_hash,int_eq);
-global_variable HashTable_int_PVOID open_files = DHDS_constructHT(int, PVOID,128,default_allocator);
-internal bool get_backingBuffer(char *file_name) 
+
+
+typedef BackingBuffer *PBackingBuffer;
+
+DEFINE_HashTable(DHSTR_String, PBackingBuffer, hash_string, [](DHSTR_String a, DHSTR_String b) {return DHSTR_eq(a, b, string_eq_length_matter); });
+global_variable HashTable_DHSTR_String_PBackingBuffer open_files = DHDS_constructHT(DHSTR_String, PBackingBuffer, 128, default_allocator);
+
+
+void attatch_BackingBuffer(TextBuffer *textBuffer, BackingBuffer *backingBuffer)
 {
-	
+	++backingBuffer->ref_count;
+	textBuffer->backingBuffer = backingBuffer;
+}
+
+
+//obviously if you're going to change to which view the backingbuffer belongs attatch before you detatch, otherwise it'll be freed
+void detach_BackingBuffer(TextBuffer *textBuffer)
+{
+	BackingBuffer *backingBuffer = textBuffer->backingBuffer;
+	--backingBuffer->ref_count;
+	if (!backingBuffer->ref_count)
+	{
+		bool hasRemoved;
+		remove(&open_files, backingBuffer->path, &hasRemoved);
+		arena_deallocate_all(backingBuffer->allocator); // including the actual backingBuffer. Nifty.
+	}
+	textBuffer->backingBuffer = (BackingBuffer *)0;
+}
+
+internal bool get_backingBuffer(DHSTR_String file_name, BackingBuffer **_out_buffer) 
+{
+	*_out_buffer = (BackingBuffer *)0;
+
+	BackingBuffer **backingBuffer_ptr;
+	BackingBuffer *backingBuffer;
+
+	if (lookup(&open_files, file_name, &backingBuffer_ptr))
+	{
+		dprs("piggybacking");
+		backingBuffer = *backingBuffer_ptr;
+	}
+	else
+	{
+		if (!openFileIntoNewBackingBuffer(&backingBuffer,file_name))
+		{
+			//@log
+			return false;
+		}
+		dprs("createing backingBuffer");
+		insert(&open_files, file_name, backingBuffer);
+	}
+	*_out_buffer = backingBuffer;
+	return true;
 }
 
 Typeface::Font LoadFont(DHSTR_String path)
@@ -1408,16 +1468,9 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	textBuffer.cursorInfo = DHDS_constructDA(CursorInfo,20, allocator);
 	textBuffer.contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook,20, allocator);
 	textBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
-	attatch_BackingBuffer(&textBuffer, allocBackingBuffer(initialMultiGapBufferSize, initialHistoryEntrySize));
 
-	//that it already is a caret here is implicit. I'm not loving it.
-	Add(&textBuffer.ownedCarets_id, textBuffer.backingBuffer->buffer->running_cursor_id-1);
-	int caret = AddCaret(textBuffer.backingBuffer->buffer, textBuffer.textBuffer_id, 0);
-	Add(&textBuffer.ownedSelection_id, caret);
-	initLineSumTree(textBuffer.backingBuffer, allocator);
 	return textBuffer;
 }
-
 
 void InsertCaret(TextBuffer *buffer, int pos, int index)  //for history reasons.
 {
@@ -1440,8 +1493,6 @@ void AddCaret(TextBuffer *buffer, int pos)
 	CursorInfo allocationInfo = {};
 	Add(&buffer->cursorInfo, allocationInfo);
 }
-
-
 
 internal void removeCaret(TextBuffer *buffer, int caretIdIndex, bool log)
 {
@@ -1509,6 +1560,8 @@ internal TextBuffer openCommanLine()
 {
 	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 200, 200);
 	textBuffer.bufferType = commandLineBuffer;
+	textBuffer.backingBuffer = allocBackingBuffer(200, 200);
+
 	initTextBuffer(&textBuffer);
 	ColorChange cc = {};
 	cc.color = foregroundColor;
@@ -1525,13 +1578,14 @@ internal TextBuffer openCommanLine()
 internal TextBuffer openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
 {
 	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
-
-	initTextBuffer(&textBuffer);
-	*success = openFile(&textBuffer, fileName);
+	BackingBuffer *bb;
+	*success = get_backingBuffer(fileName, &bb);
 	if(success)
 	{
+		attatch_BackingBuffer(&textBuffer, bb);
 		textBuffer.fileName = fileName; //COPY ME??
 		redoLineSumTree(textBuffer.backingBuffer);
+		initTextBuffer(&textBuffer); //setting user_specified_bindings
 	} else
 	{
 		freeTextBuffer(textBuffer);
@@ -2289,13 +2343,11 @@ internal void bigTitles(TextBuffer *textBuffer, CharRenderingInfo *settings, int
 typedef void(*LineChangeHook)(TextBuffer *textBuffer, CharRenderingInfo *settings, int currentLine);
 
 
-
 internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret, 
 	LineChangeHook *lineChangeFuncs=0, int NumberOfLineChangeFuncs=0)
 {
 	MGB_Iterator it = getIteratorAtLine(textBuffer, startLine);
-	MGB_Iterator last_written_it = getIteratorAtLine(textBuffer, startLine);
-
+	
 	textBuffer->caretX = -10;
 	int orgX = x;
 	bool ended = false;
@@ -2330,6 +2382,10 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			ended = !MoveIterator(mgb, &it, read);
 			
 			bool lineBreak= isLineBreak(codepoint);
+			if (codepoint == '\r' && !lineBreak)
+			{
+				int q = 3;
+			}
 
 			{
 				int width = 0;
@@ -2345,14 +2401,15 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				if(!lineBreak)
 					renderCharacter(bitmap, codepoint, rendering);
 			}
-			selection = onSelection ^ onCaret ^ selection;
-
 			
 			//oh yea! Think about this for a while...
 			//hint: if none of select and caret are here don't toggle selection
 			//		if both toggle selection twice (ie zero times)
 			//		otherwise toggle. 
+			
+			selection = onSelection ^ onCaret ^ selection;
 
+			
 			if (onCaret)
 			{
 				if (drawCaret)
@@ -2360,10 +2417,12 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				textBuffer->caretX = (rendering.x - orgX);
 			}
 
-
 			if (lineBreak)
 			{
-				currentLine++;
+				if (codepoint == '\r' &&  *getCharacter(mgb, it) == '\n'){ // \r\n is a single lineending.
+					ended |= !MoveIterator(mgb, &it, 1);
+				}
+				++currentLine;
 				for (int i = 0; i < NumberOfLineChangeFuncs; i++)
 				{
 					lineChangeFuncs[i](textBuffer, &rendering, currentLine);
@@ -2618,6 +2677,11 @@ internal bool stripInitialWhite(MultiGapBuffer *buffer, MGB_Iterator *it, int *c
 
 internal void initTextBuffer(TextBuffer *textBuffer)
 {
+	int caret_i = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
+	Add(&textBuffer->ownedCarets_id, caret_i);
+	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
+	Add(&textBuffer->ownedSelection_id, caret_s);
+
 	_setLocalBindings(textBuffer);
 }
 

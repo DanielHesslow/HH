@@ -176,29 +176,25 @@ bool pushValid(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
 	bool l = pushLeft(buffer, it);
 	bool r = pushRight(buffer, it);
-	assert((!r && !l) || r);
-	return r;
+	return r&&l;
 }
-
 
 bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
-	// hrm I wonder why the initial pushRight is neccessary? I though it was first, now I don't get it though. (since i though we allow negative indexing)
 	++it->sub_index;
-	return pushRight(buffer, it);
+	return pushValid(buffer, it);
 }
 
 bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it)
 {
 	--it->sub_index;
-	return pushLeft(buffer, it);
+	return pushValid(buffer, it);
 }
 
 bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
 {
 	it->sub_index += direction;
-	if (direction > 0)return pushRight(buffer, it);
-	else return pushLeft(buffer, it);
+	return pushValid(buffer, it);
 }
 
 int getCodepoint(MultiGapBuffer *buffer, MGB_Iterator it, char32_t *code_point)
@@ -228,6 +224,8 @@ char *get(MultiGapBuffer *buffer, int caretId, Direction dir)
 {
 	// this might get garbage on either side of the buffer
 	// not doing checks for this *might* be beneficial. We'll see.
+	
+	//hrm investigate what the fuck we meant... That didn't seam to good now did it?
 	int caretIndex = indexFromId(buffer,caretId);
 	if (dir == dir_left)
 	{
@@ -251,7 +249,7 @@ MultiGapBuffer createMultiGapBuffer(int size)
 	Add(&buffer.blocks,first);
 	Add(&buffer.blocks,last);
 	buffer.cursor_ids = constructDynamicArray_CursorIdentifier(20,"mutliGapBuffer cursors");
-	Add(&buffer.cursor_ids, { 0,buffer.running_cursor_id++});
+	Add(&buffer.cursor_ids, { 0,buffer.running_cursor_id});
 	return buffer;
 }
 
@@ -390,8 +388,16 @@ int AddCaret_(MultiGapBuffer *buffer, int pos)
 
 int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
 {
-	int index = AddCaret_(buffer, pos);
-	Insert(&buffer->cursor_ids, { textBuffer_index, buffer->running_cursor_id}, index - 1);
+	int index;
+	if (buffer->running_cursor_id == 994) // the first index is implicit. which is not great but it does simplyfy things
+	{
+		index = 0;
+	}
+	else
+	{
+		index = AddCaret_(buffer, pos);
+		Insert(&buffer->cursor_ids, { textBuffer_index, buffer->running_cursor_id }, index - 1);
+	}
 	return buffer->running_cursor_id++;
 }
 

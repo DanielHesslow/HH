@@ -236,9 +236,11 @@ struct BackingBuffer
 	MultiGapBuffer *buffer;
 	History history;
 	DynamicArray_int lineSumTree;
+	int lines;
 	HashTable_BindingIdentifier_PVOID bindingMemory;
 	HashTable_PVOID_HistoryChangeTracker binding_next_change;
 	uint64_t ref_count;
+	DHSTR_String path; 
 	DH_Allocator allocator;
 };
 

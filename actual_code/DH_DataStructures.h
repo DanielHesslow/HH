@@ -299,7 +299,7 @@ void compatible_free(void *mem_to_free, void *allocation_info)
 {
 	free_(mem_to_free);
 }
-static DH_Allocator default_allocator = { &alloc_,&compatible_free };
+static DH_Allocator default_allocator = { &alloc_, &compatible_free };
 
 
 #define DEFINE_HashTable(key_type, value_type, hash_function,key_equality_func)\
