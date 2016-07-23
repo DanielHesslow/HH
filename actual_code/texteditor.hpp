@@ -738,8 +738,6 @@ internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex,
 	return success;
 }
 
-
-
 internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection, MoveMode mode)
 {
 	bool success = move_llnc(textBuffer, dir, caretIdIndex, log == do_log, move_caret_insert,mode);
@@ -877,6 +875,7 @@ internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdInd
 		moveCaretToX(textBuffer, getPreferedCaretX(textBuffer,caretIdIndex), selection, caretIdIndex);
 	}
 }
+
 internal void moveUp_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex) //handle selecitons
 {
 	moveV_nc(textBuffer, selection, caretIdIndex, true);
@@ -1538,12 +1537,9 @@ internal TextBuffer cloneTextBuffer(TextBuffer *buffer)
 
 internal void freeTextBuffer(TextBuffer buffer)
 {
-	detach_BackingBuffer(&buffer);
+	if(buffer.backingBuffer)
+		detach_BackingBuffer(&buffer);
 	arena_deallocate_all(buffer.allocator);
-	/*
-	freeMultiGapBuffer(buffer.backingBuffer->buffer);
-	free_(buffer.font.font_info);
-	*/
 }
 
 internal void closeTextBuffer(Data *data)
@@ -1580,17 +1576,18 @@ internal TextBuffer openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
 	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
 	BackingBuffer *bb;
 	*success = get_backingBuffer(fileName, &bb);
-	if(success)
+	if(*success)
 	{
 		attatch_BackingBuffer(&textBuffer, bb);
 		textBuffer.fileName = fileName; //COPY ME??
 		redoLineSumTree(textBuffer.backingBuffer);
 		initTextBuffer(&textBuffer); //setting user_specified_bindings
+		return textBuffer;
 	} else
 	{
 		freeTextBuffer(textBuffer);
+		return{};
 	}
-	return textBuffer;
 }
 
 internal void getFileWriteTime_PLATFORM(char *fileName)
@@ -1607,8 +1604,7 @@ internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String path)
 	// so the b below is for binary.
 	// 'but we're writing text right?'
 	// yea but windows enjoys substituting \n with \r\n
-	// which we don't like to do. if we like to change the line endings well fucking change the line endings
-	// this should fix the bug with increasing amount of lineenings.
+	// which we don't like to do. if we like to change the line endings we'll fucking change the line endings
 	FILE *file = _wfopen(DHSTR_WCHART_FROM_STRING(path, alloca), L"wb");
 	if (file)
 	{
@@ -1616,7 +1612,6 @@ internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String path)
 			if (buffer->blocks.length != 0)
 				fwrite(start_of_block(buffer,i), sizeof(char), length_of_block(buffer,i), file);
 	}
-
 	fclose(file);
 }
 
@@ -1780,13 +1775,9 @@ internal inline __m128i div255(__m128i x)
 
 	return x;
 }
-internal inline __m128i andlow16(__m128i x)
-{
-	return _mm_and_si128(x, SSE_ff00);
-}
 
-
-internal void blitChar(CharBitmap from, Bitmap to, int x, int y,int color)
+// bliting a char bitmap 8 pixels at a time. x is specified in thirds of a pixel granuality, y is specified in whole pixel granuality.
+internal void blitChar(CharBitmap from, Bitmap to, int x, int y, int color)
 {
 	int xOffset = x + from.xOff;
 	int yOffset = y + from.yOff;
@@ -1830,9 +1821,9 @@ internal void blitChar(CharBitmap from, Bitmap to, int x, int y,int color)
 			bool ok_line = false;
 			for(int x = 0; x<from.width; x+=8)
 			{
-				if (!((x + xOffset/3) >= to.width || (x + xOffset) < 0))
+				if (!((x + xOffset/3) >= to.width || (x + xOffset/3) < -7)) // unnessary but possibly faster?
 				{
-					
+					// load values
 					__m128i alpha_r_packed_8 = _mm_loadu_si128((__m128i *) &(colors[0][x + y*from.colorStride]));
 					__m128i alpha_g_packed_8 = _mm_loadu_si128((__m128i *) &(colors[1][x + y*from.colorStride]));
 					__m128i alpha_b_packed_8 = _mm_loadu_si128((__m128i *) &(colors[2][x + y*from.colorStride]));
@@ -1841,10 +1832,14 @@ internal void blitChar(CharBitmap from, Bitmap to, int x, int y,int color)
 					__m128i alpha_g = _mm_unpacklo_epi8(alpha_g_packed_8, SSE_0);
 					__m128i alpha_b = _mm_unpacklo_epi8(alpha_g_packed_8, SSE_0);
 					
-					__m128i max = _mm_set1_epi16(from.width-x);
-					__m128i count = _mm_set_epi16(7,6,5,4,3,2,1,0);
-					__m128i write_mask = _mm_cmplt_epi16(count, max);
+					// calc correct write mask.
+					__m128i max = _mm_set1_epi16(min(from.width - x, to.width - x - xOffset / 3));
+					__m128i min = _mm_set1_epi16(x+xOffset/3);
+					__m128i count_down = _mm_set_epi16(7, 6, 5, 4, 3, 2, 1, 0);
+					__m128i count_up = _mm_set_epi16(-7, -6, -5, -4, -3, -2, -1, 0); 
+					__m128i write_mask = _mm_and_si128(_mm_cmplt_epi16(count_up, min),_mm_cmplt_epi16(count_down, max)); // I think this might be right...
 
+					// the alpha _at_ the r sub_pixel position. 
 					alpha_r = _mm_and_si128(write_mask, alpha_r);
 					alpha_g = _mm_and_si128(write_mask, alpha_g);
 					alpha_b = _mm_and_si128(write_mask, alpha_b);
@@ -1866,14 +1861,13 @@ internal void blitChar(CharBitmap from, Bitmap to, int x, int y,int color)
 					__m128i res_b = div255(_mm_add_epi16(_mm_mullo_epi16(color_b, alpha_b), _mm_mullo_epi16(src_b, inv_alpha_b)));
 					__m128i res_a = _mm_set1_epi16(0);
 
-					// unpack
+					// unpack (notice empty space between first values, that's to allow for the div in the alpha blend)
 					// a a a a| g g g g| r r r r| b b b b| -> |argbargb|argbargb| 
 
 					__m128i aglo = _mm_unpacklo_epi16(res_g, res_a);
 					__m128i aghi = _mm_unpackhi_epi16(res_g, res_a);
 					__m128i rblo = _mm_unpacklo_epi16(res_b, res_r);
 					__m128i rbhi = _mm_unpackhi_epi16(res_b, res_r);
-
 
 					_mm_storeu_si128((__m128i *)(toPixel + 0), _mm_packus_epi16(_mm_unpacklo_epi16(rblo, aglo), _mm_unpackhi_epi16(rblo, aglo)));
 					_mm_storeu_si128((__m128i *)(toPixel + 4), _mm_packus_epi16(_mm_unpacklo_epi16(rbhi, aghi), _mm_unpackhi_epi16(rbhi, aghi)));
@@ -2362,7 +2356,6 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 
 	char32_t last_codepoint=0;
 
-	
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 
 	bool selection = false;
@@ -2370,6 +2363,10 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 
 	if (length(textBuffer->backingBuffer->buffer))
 	{
+
+		//on the right the caracters render overflow, on the left they're not rendered unless they're completely in.
+		//wrong in other words. Probs with the simd opt?
+
 		while (!ended)
 		{
 			bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
@@ -2402,11 +2399,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 					renderCharacter(bitmap, codepoint, rendering);
 			}
 			
-			//oh yea! Think about this for a while...
-			//hint: if none of select and caret are here don't toggle selection
-			//		if both toggle selection twice (ie zero times)
-			//		otherwise toggle. 
-			
+			//oh yea! Think about this for a while... (I'm sorry, but I like it)
 			selection = onSelection ^ onCaret ^ selection;
 
 			
@@ -2435,6 +2428,19 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			prev_it = pit;
 			last_codepoint = codepoint;
 		}
+		bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
+		bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
+		if (drawCaret && (onCaret || onSelection)) // final caret.
+		{
+			int width = 0;
+			if (last_codepoint != 0) {
+				width = getCharacterWidth(textBuffer, prev_it, last_codepoint, '|', rendering.typeface, rendering.scale);
+			}
+			rendering.x += width;
+			renderCaret(bitmap, rendering.x, rendering.y, rendering.scale, rendering.typeface, onCaret ? caretColor : caretColorDark);
+			textBuffer->caretX = (rendering.x - orgX);
+		}
+
 	}
 }
 
