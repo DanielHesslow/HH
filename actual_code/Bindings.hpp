@@ -793,15 +793,14 @@ internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_ch
 	{
 		memo = (HashTable_Locator_int *)*memoPtr;
 	}
-	HistoryEntry event;
+	BufferChange event;
+	bool changed = false;
 	while (next_history_change(buffer->backingBuffer,&elasticTab,&event)) 
 	{
-		if (event.action != action_move){
-			clear(memo);
-			break;
-		}
+		changed = true;
 	}
-	
+	if (changed)clear(memo);
+
 	float max_w = calculateIteratorX(buffer, it);
 	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
 	MGB_Iterator itstart = it;

@@ -278,7 +278,7 @@ internal void initLineSumTree(BackingBuffer *backingBuffer,DH_Allocator allocato
 
 internal int getLines(BackingBuffer *buffer)
 {
-	HistoryEntry entry;
+	BufferChange entry;
 	while (next_history_change(buffer, &getLines, &entry))
 	{
 		if (isLineBreak(entry.character))
@@ -298,73 +298,72 @@ internal int getLines(BackingBuffer *buffer)
 	return buffer->lines;
 }
 
+
+internal void updateLineData(TextBuffer *textBuffer)
+{
+	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
+	BufferChange entry;
+	while (next_history_change(textBuffer->backingBuffer, &updateLineData, &entry))
+	{
+		switch (entry.action)
+		{
+		case buffer_change_add:
+		{
+			if (isLineBreak(entry.character))
+			{
+				int leef_index;
+				if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
+				int length_of_current_line = sum_tree->start[leef_index];
+				int length_of_new_line = length_of_current_line - entry.location.column;
+				assert(length_of_new_line >= 0);
+				binsumtree_set(sum_tree, entry.location.line, entry.location.column + 1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?) dude fuck \r\n, we don't have it. (removed on open file, (maybe) added on write file)
+				binsumtree_insert(sum_tree, entry.location.line + 1, length_of_current_line - entry.location.column);
+			}
+			else
+			{
+				binsumtree_set_relative(sum_tree, entry.location.line, +1);
+			}
+		}break;
+		case buffer_change_remove:
+		{
+			if (isLineBreak(entry.character))
+			{
+				int leef_index;
+				if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
+				int len = sum_tree->start[leef_index] - 1;
+				binsumtree_set_relative(sum_tree, entry.location.line - 1, len);
+				binsumtree_remove(sum_tree, entry.location.line);
+			}
+			else
+			{
+				binsumtree_set_relative(sum_tree, entry.location.line, -1);
+			}
+		}break;
+		}
+	}
+}
+
+internal int getLineLength(TextBuffer *textBuffer, int line)
+{
+	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
+	updateLineData(textBuffer);
+	int value;
+	if (!binsumtree_leef_value(sum_tree, line, &value))
+	{
+		return -1;
+	}
+	return value;
+}
+
 internal int getLine(TextBuffer *textBuffer, int pos)
 {
 	
 	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
-	//we don't fucking work at the end. fix me.	
-	//incremental updates
-	HistoryEntry entry;
-	while (next_history_change(textBuffer->backingBuffer, &getLine, &entry))
-	{
-		switch (entry.action)
-		{
-			case action_undelete:
-			case action_add:
-			{
-				if (isLineBreak(entry.character))
-				{
-					int leef_index;
-					if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
-					int length_of_current_line = sum_tree->start[leef_index];
-					int length_of_new_line = length_of_current_line - entry.location.column;
-					assert(length_of_new_line >= 0);
-					binsumtree_set(sum_tree, entry.location.line, entry.location.column +1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?) dude fuck \r\n, we don't have it. (removed on open file, (maybe) added on write file)
-					binsumtree_insert(sum_tree, entry.location.line+1, length_of_current_line-entry.location.column);
-				}
-				else
-				{
-					binsumtree_set_relative(sum_tree, entry.location.line, +1);
-				}
-			}break;
-			
-			case action_delete:
-			{
-				if (isLineBreak(entry.character))
-				{
-					int leef_index;
-					if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
-					int len = sum_tree->start[leef_index + 1] - 1;
-					binsumtree_set_relative(sum_tree, entry.location.line, len);
-					binsumtree_remove(sum_tree, entry.location.line + 1);
-				}
-				else
-				{
-					binsumtree_set_relative(sum_tree, entry.location.line, -1);
-				}
-			}break;
-			case action_remove:
-			{
-				if (isLineBreak(entry.character))
-				{
-					int leef_index;
-					if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
-					int len = sum_tree->start[leef_index]-1;
-					binsumtree_set_relative(sum_tree, entry.location.line-1, len);
-					binsumtree_remove(sum_tree, entry.location.line);
-				}
-				else
-				{
-					binsumtree_set_relative(sum_tree, entry.location.line, -1);
-				}
-			}break;
-		}
-		
-	}
+	updateLineData(textBuffer);
 	int res_index = -1;
 	if (!binsumtree_search(sum_tree, pos, &res_index))
 	{
-		res_index = binsumtree_get_length(sum_tree); //is this right???
+		res_index = getLines(textBuffer->backingBuffer)-1;
 	}
 	int total_lines = getLines(textBuffer->backingBuffer);
 	if (res_index >= total_lines)return total_lines-1;
@@ -485,7 +484,7 @@ internal void appendCharacter(TextBuffer *textBuffer, char character, int caretI
 	if (log)
 		loc = getLocationFromCaret(textBuffer, caretId);
 	if (log)
-		logAdded(&textBuffer->backingBuffer->history, character, caretIdIndex,loc);
+		logAdded(textBuffer, character, caretIdIndex, loc);
 	
 	appendCharacter(textBuffer->backingBuffer->buffer, caretId, character);
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
@@ -513,7 +512,7 @@ internal bool removeCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
 	if (removed && log)
 	{
-		logRemoved(&textBuffer->backingBuffer->history, toBeRemoved, caretIdIndex,loc );
+		logRemoved(textBuffer, toBeRemoved, caretIdIndex,loc );
 	}
 	return removed;
 }
@@ -555,7 +554,7 @@ internal bool deleteCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log
 	bool deleted = del(textBuffer->backingBuffer->buffer, caretId);
 	if (deleted && log)
 	{
-		logDeleted(&textBuffer->backingBuffer->history, toBeDeleted, caretIdIndex, loc);
+		logDeleted(textBuffer, toBeDeleted, caretIdIndex, loc);
 	}
 	return deleted;
 }
@@ -706,7 +705,7 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, boo
 			if (mgb_moveLeft(mgb, caretId))
 			{
 				if (log)
-					logMoved(&textBuffer->backingBuffer->history, dir, false, caretId, loc);
+					logMoved(textBuffer, dir, false, caretId, loc);
 				success = true;
 			}
 	}
@@ -716,7 +715,7 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, boo
 			if (mgb_moveRight(mgb, caretId))
 			{
 				if (log)
-					logMoved(&textBuffer->backingBuffer->history, dir, false, caretId, loc);
+					logMoved(textBuffer, dir, false, caretId, loc);
 				success = true;
 			}
 	}
@@ -1169,7 +1168,7 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 	History history = {};
 	history.entries = constructDynamicArray_HistoryEntry(initialHistoryEntrySize, "history", allocator);
 	history.branches = ORD_constructDynamicArray_HistoryBranch(initialHistoryEntrySize, "history branches", allocator);
-	history.change_log = constructDynamicArray_HistoryChange(initialHistoryEntrySize, "history change log", allocator);
+	history.change_log = constructDynamicArray_BufferChange(initialHistoryEntrySize, "history change log", allocator);
 	history.events = ORD_constructDynamicArray_HistoryEventMarker(initialHistoryEntrySize, "history event markers", allocator);
 	buffer->history = history;
 	buffer->buffer = stringBuffer;
@@ -1488,7 +1487,7 @@ void AddCaret(TextBuffer *buffer, int pos)
 	Add(&buffer->ownedSelection_id, id_sel);
 	int id = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
 	Add(&buffer->ownedCarets_id, id);
-	logAddCaret(&buffer->backingBuffer->history, pos, pos, buffer->ownedCarets_id.length-1, getLocationFromCaret(buffer, id));
+	logAddCaret(buffer, pos, pos, buffer->ownedCarets_id.length-1, getLocationFromCaret(buffer, id));
 	CursorInfo allocationInfo = {};
 	Add(&buffer->cursorInfo, allocationInfo);
 }
@@ -1498,7 +1497,7 @@ internal void removeCaret(TextBuffer *buffer, int caretIdIndex, bool log)
 	int pos_caret = getCaretPos(buffer->backingBuffer->buffer, buffer->ownedCarets_id.start[caretIdIndex]);
 	int pos_selection = getCaretPos(buffer->backingBuffer->buffer, buffer->ownedSelection_id.start[caretIdIndex]);
 	if (log)
-		logRemoveCaret(&buffer->backingBuffer->history, pos_caret, pos_selection, caretIdIndex, getLocationFromCaret(buffer, buffer->ownedSelection_id.start[caretIdIndex]));
+		logRemoveCaret(buffer, pos_caret, pos_selection, caretIdIndex, getLocationFromCaret(buffer, buffer->ownedSelection_id.start[caretIdIndex]));
 
 	removeCaret(buffer->backingBuffer->buffer, buffer->ownedCarets_id.start[caretIdIndex]);
 	RemoveOrd(&buffer->ownedCarets_id, caretIdIndex);

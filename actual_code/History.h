@@ -75,17 +75,25 @@ enum HistoryChangeType
 	HistoryChange_undo,
 };
 
-struct HistoryChange
+enum BufferChangeAction
 {
-	HistoryChangeType type;
-	int index; //refernce to the actual history entries by index
+	buffer_change_add,
+	buffer_change_remove,
 };
-DEFINE_DynamicArray(HistoryChange);
+
+struct BufferChange
+{
+	BufferChangeAction action;
+	char character; // should be char32_t but for now I don't want to dig into that.
+	Location location;
+};
+
+DEFINE_DynamicArray(BufferChange);
 
 struct History
 {
 	DynamicArray_HistoryEntry entries;
-	DynamicArray_HistoryChange change_log; //undos and redos are also saved here.. as references to the entries
+	DynamicArray_BufferChange change_log; //undos and redos are also saved here.. as references to the entries
 	int current_index;
 	ORD_DynamicArray_HistoryBranch branches; // as a sparse array
 	ORD_DynamicArray_HistoryEventMarker events; // as a sparse array
@@ -97,12 +105,12 @@ internal bool treatEQ(Action a, Action b);
 internal bool undo(TextBuffer *textBuffer);
 internal bool redo(TextBuffer *textBuffer);
 internal void undoMany(TextBuffer *textBuffer);
-internal void logRemoved(History *history, char16_t character, int caretIdIndex,Location location);
-internal void logDeleted(History *history, char16_t character, int caretIdIndex, Location location);
-internal void logAdded(History *history, char16_t character, int caretIdIndex, Location location);
-internal void logMoved(History *history, Direction direction, bool selection, int caretIdIndex, Location location);
-internal void logAddCaret(History *history, int pos_caret, int pos_selection, int caretIdIndex, Location location);
-internal void logRemoveCaret(History *history, int pos_caret, int pos_selection, int caretIdIndex, Location location);
+internal void logRemoved(TextBuffer *textBuffer, char character, int caretIdIndex,Location location);
+internal void logDeleted(TextBuffer *textBuffer, char character, int caretIdIndex, Location location);
+internal void logAdded(TextBuffer *textBuffer, char character, int caretIdIndex, Location location);
+internal void logMoved(TextBuffer *textBuffer, Direction direction, bool selection, int caretIdIndex, Location location);
+internal void logAddCaret(TextBuffer *textBuffer, int pos_caret, int pos_selection, int caretIdIndex, Location location);
+internal void logRemoveCaret(TextBuffer *textBuffer, int pos_caret, int pos_selection, int caretIdIndex, Location location);
 internal void insert_event_marker(History *history, HistoryMarkerType type);
 
 #endif

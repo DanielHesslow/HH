@@ -668,6 +668,12 @@ int binsumtree_left_most_leef(DynamicArray_int *tree, int index)
 		if (!binsumtree_left(tree, index, &index))break;
 	return index;
 }
+bool binsumtree_leef_value(DynamicArray_int *tree, int leef_index, int *value)
+{
+	int index;
+	bool success = binsumtree_index_from_leef_index(tree, leef_index, &index);
+	RETURN_SUCCESS_AND_VALUE(success, value, tree->start[index]);
+}
 bool binsumtree_search(DynamicArray_int *tree, int elem, int* _out_result_index, int index = 1)
 {
 	if (elem <= 0)

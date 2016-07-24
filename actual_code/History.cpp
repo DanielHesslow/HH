@@ -62,9 +62,80 @@ bool get_next_HistoryEntry_index(History *history, int *in_out_index) //in out i
 		++*in_out_index;
 	return success;
 }
+internal int getLineLength(TextBuffer *textBuffer, int line);
+
+Location move_right(TextBuffer *textBuffer, Location loc)
+{
+	++loc.column;
+	if (loc.column > getLineLength(textBuffer, loc.line))
+	{
+		loc.column = 0;
+		++loc.line;
+	}
+	return loc;
+}
+
+void addChangeEvent(TextBuffer *textBuffer, HistoryEntry entry)
+{
+	Location loc = entry.location;
+	BufferChangeAction action;
+	switch (entry.action)
+	{
+	case action_move:
+		return;
+	case action_delete:
+		loc = move_right(textBuffer, loc);
+	case action_remove:
+		action = buffer_change_remove;
+		break;
+	case action_undelete:
+		loc = move_right(textBuffer, loc);
+	case action_add:
+		action = buffer_change_add;
+		break;
+	}
+	BufferChange ch = {};
+	ch.action = action;
+	ch.location = loc;
+	ch.character = entry.character;
+	Add(&textBuffer->backingBuffer->history.change_log, ch);
+}
+
+HistoryEntry invert_event(HistoryEntry prev_entry)
+{
+	switch (prev_entry.action)
+	{
+	case action_move:
+		prev_entry.direction = -prev_entry.direction;
+		break;
+	case action_add:
+		prev_entry.action = action_remove;
+		break;
+	case action_remove:
+		prev_entry.action = action_add;
+		break;
+	case action_delete:
+		prev_entry.action = action_undelete;
+		break;
+	case action_undelete:
+		prev_entry.action = action_delete;
+		break;
+	case action_addCaret:
+		prev_entry.action = action_removeCaret;
+		break;
+	case action_removeCaret:
+		prev_entry.action = action_addCaret;
+		break;
+	default:
+		assert(false && "action not found.");
+	}
+	return prev_entry;
+}
+
 
 void undo_history_event(TextBuffer *textBuffer, HistoryEntry prev_entry)
 {
+	addChangeEvent(textBuffer,invert_event(prev_entry));
 	switch (prev_entry.action)
 	{
 	case action_move:
@@ -103,37 +174,6 @@ void undo_history_event(TextBuffer *textBuffer, HistoryEntry prev_entry)
 	}
 }
 
-HistoryEntry invert_event(HistoryEntry prev_entry)
-{
-	switch (prev_entry.action)
-	{
-	case action_move:
-		prev_entry.direction = -prev_entry.direction;
-		break;
-	case action_add:
-		prev_entry.action = action_remove;
-		break;
-	case action_remove:
-		prev_entry.action = action_add;
-		break;
-	case action_delete:
-		prev_entry.action = action_undelete;
-		break;
-	case action_undelete:
-		prev_entry.action = action_delete;
-		break; 
-	case action_addCaret:
-		prev_entry.action = action_removeCaret;
-		break;
-	case action_removeCaret:
-		prev_entry.action = action_addCaret;
-		break;
-	default:
-		assert(false && "action not found.");
-	}
-	return prev_entry;
-}
-
 
 
 bool can_redo(History *history)
@@ -145,6 +185,7 @@ bool can_undo(History *history)
 	return history->current_index > 0;
 }
 
+
 bool undo(TextBuffer *textBuffer)
 {
 	History *history = &textBuffer->backingBuffer->history;
@@ -152,11 +193,6 @@ bool undo(TextBuffer *textBuffer)
 	if (!get_prev_HistoryEntry_index(history, &prev_index)) return false;
 	HistoryEntry prev = history->entries.start[prev_index];
 	
-	HistoryChange change = {};
-	change.index = prev_index;
-	change.type = HistoryChange_undo;
-	Add(&history->change_log, change);
-
 	undo_history_event(textBuffer, prev);
 	history->current_index = prev_index;
 	return true;
@@ -170,11 +206,7 @@ bool redo(TextBuffer *textBuffer)
 		int index = textBuffer->backingBuffer->history.current_index;
 		HistoryEntry next = textBuffer->backingBuffer->history.entries.start[index]; 
 		undo_history_event(textBuffer, invert_event(next));
-		HistoryChange change = {};
-		change.index = index;
-		change.type = HistoryChange_do;
-		Add(&history->change_log, change);
-
+		
 		if (!get_next_HistoryEntry_index(history, &index))
 			++textBuffer->backingBuffer->history.current_index;
 		else
@@ -271,8 +303,9 @@ void branch_from_current(History *history)
 	history->current_index = history->entries.length;
 }
 
-void log_base(History *history, HistoryEntry new_entry) // no maths lol
+void log_base(TextBuffer *textBuffer, HistoryEntry new_entry) // no maths lol
 {
+	History *history = &textBuffer->backingBuffer->history;
 	if (!treatEQ(history->entries.start[history->current_index].action, new_entry.action))
 	{
 	//	insert_event_marker(history, history_mark_weak_end); // ayy weekend 
@@ -283,62 +316,43 @@ void log_base(History *history, HistoryEntry new_entry) // no maths lol
 	}
 	Add(&history->entries, new_entry);
 	history->current_index = history->entries.length;
-	HistoryChange change = {};
-	change.index = history->current_index - 1;
-	change.type = HistoryChange_do;
-	Add(&history->change_log,change);
+	addChangeEvent(textBuffer, new_entry);
 }
 
-void log_base(History *history, Action action, char character, int caretIdIndex,Location location)
+void log_base(TextBuffer *textBuffer, Action action, char character, int caretIdIndex,Location location)
 {
+	History *history = &textBuffer->backingBuffer->history;
 	HistoryEntry prev_entry = {};
 	prev_entry.action = action;
 	prev_entry.caretIdIndex = caretIdIndex;
 	prev_entry.character = character;
 	prev_entry.location = location;
-	log_base(history, prev_entry);
+	log_base(textBuffer, prev_entry);
 }
 
-void logRemoved(History *history, char character, int caretIdIndex, Location location)
+void logRemoved(TextBuffer *textBuffer, char character, int caretIdIndex, Location location)
 {
-	log_base(history, action_remove, character, caretIdIndex, location);
+	log_base(textBuffer, action_remove, character, caretIdIndex, location);
 }
 
-void logDeleted(History *history, char character, int caretIdIndex, Location location)
+void logDeleted(TextBuffer *textBuffer, char character, int caretIdIndex, Location location)
 {
-	log_base(history, action_delete, character, caretIdIndex, location);
+	log_base(textBuffer, action_delete, character, caretIdIndex, location);
 }
 
-void logAdded(History *history, char character, int caretIdIndex, Location location)
+void logAdded(TextBuffer *textBuffer, char character, int caretIdIndex, Location location)
 {
-	log_base(history, action_add, character, caretIdIndex, location);
+	log_base(textBuffer, action_add, character, caretIdIndex, location);
 }
 
-void logUndelete(History *history, char character, int caretIdIndex, Location location)
+void logUndelete(TextBuffer *textBuffer, char character, int caretIdIndex, Location location)
 {
-	log_base(history, action_undelete, character, caretIdIndex, location);
+	log_base(textBuffer, action_undelete, character, caretIdIndex, location);
 }
 
-/*
-int prev_index;
-bool hasPrev = get_prev_HistoryEntry_index(history, &prev_index);
-
-if (hasPrev)
+void logMoved(TextBuffer *textBuffer, Direction direction, bool selection, int caretIdIndex, Location location)
 {
-	HistoryEntry prev = history->entries.start[prev_index];
-	if (prev.action == action_move && prev.caretIdIndex == caretIdIndex)
-	{
-		prev.selection = selection;
-		prev.direction += intFromDir(direction);
-		return;
-	}
-}
-*/
-
-//redo to prev instead of current... yea...
-
-void logMoved(History *history, Direction direction, bool selection, int caretIdIndex, Location location)
-{
+	History *history = &textBuffer->backingBuffer->history;
 	int prev_index=history->current_index;
 	while (get_prev_HistoryEntry_index(history, &prev_index))
 	{
@@ -364,11 +378,11 @@ void logMoved(History *history, Direction direction, bool selection, int caretId
 		prev_entry.direction = intFromDir(direction);
 		prev_entry.selection = selection;
 		prev_entry.location = location;
-		log_base(history, prev_entry);
+		log_base(textBuffer, prev_entry);
 	}
 }
 
-void logAddCaret(History *history, int pos_caret, int pos_selection, int caretIdIndex, Location location)
+void logAddCaret(TextBuffer *textBuffer, int pos_caret, int pos_selection, int caretIdIndex, Location location)
 {
 	//do branch
 	HistoryEntry prev_entry = {};
@@ -377,10 +391,10 @@ void logAddCaret(History *history, int pos_caret, int pos_selection, int caretId
 	prev_entry.pos_caret = pos_caret;
 	prev_entry.pos_selection = pos_selection;
 	prev_entry.location = location;
-	log_base(history, prev_entry);
+	log_base(textBuffer, prev_entry);
 }
 
-void logRemoveCaret(History *history, int pos_caret, int pos_selection, int caretIdIndex,Location location)
+void logRemoveCaret(TextBuffer *textBuffer, int pos_caret, int pos_selection, int caretIdIndex,Location location)
 {
 	//do branch
 	HistoryEntry prev_entry = {};
@@ -389,17 +403,16 @@ void logRemoveCaret(History *history, int pos_caret, int pos_selection, int care
 	prev_entry.pos_caret = pos_caret;
 	prev_entry.pos_selection = pos_selection;
 	prev_entry.location = location;
-	log_base(history, prev_entry);
+	log_base(textBuffer, prev_entry);
 }
 
-bool next_history_change(BackingBuffer *buffer, void *function, HistoryEntry *_out_event)
+bool next_history_change(BackingBuffer *buffer, void *function, BufferChange *_out_change)
 { 
 	HistoryChangeTracker *change_tracker;
-	if (!lookup(&buffer->binding_next_change, function, &change_tracker)) //huh stack overflow...
+	if (!lookup(&buffer->binding_next_change, function, &change_tracker)) 
 	{
 		HistoryChangeTracker ch = {};
 		ch.next_index = 0;
-		ch.prev_entry = {};
 		change_tracker = insert(&buffer->binding_next_change, function, ch);
 	}
 	DynamicArray_HistoryEntry entries = buffer->history.entries;
@@ -409,32 +422,15 @@ bool next_history_change(BackingBuffer *buffer, void *function, HistoryEntry *_o
 	// without appending additional events
 	// api users does not have to deal with that shit, it's just memory optimization. 
 
-	if (change_tracker->next_index > 0)
-	{
-		HistoryChange reference = buffer->history.change_log.start[change_tracker->next_index - 1];
-		HistoryEntry referenced_entry = entries.start[reference.index];
-
-		if (change_tracker->prev_entry.action == action_move && referenced_entry.action == action_move && change_tracker->prev_entry.direction != referenced_entry.direction)
-		{	//uuugh not just the last event may change though....
-			HistoryEntry cpy = referenced_entry;
-			referenced_entry.direction -= change_tracker->prev_entry.direction;
-			*_out_event = reference.type == HistoryChange_do ? referenced_entry : invert_event(referenced_entry);
-			change_tracker->prev_entry = cpy;
-			return true;
-		}
-	}	
-	
 	if (change_tracker->next_index < buffer->history.change_log.length)
 	{
-		HistoryChange reference = buffer->history.change_log.start[change_tracker->next_index];
-		HistoryEntry referenced_entry = entries.start[reference.index];
+		BufferChange reference = buffer->history.change_log.start[change_tracker->next_index];
 
 		++change_tracker->next_index;
-		change_tracker->prev_entry = referenced_entry;
-		*_out_event = reference.type == HistoryChange_do ? change_tracker->prev_entry : invert_event(change_tracker->prev_entry);
+		*_out_change = reference;
 		return true;
 	}
 	
-	_out_event = (HistoryEntry *)0; // if somebody illegally tries to deref this having this be null is the best course of action
+	_out_change = (BufferChange *)0; // if somebody illegally tries to deref this having this be null is the best course of action
 	return false;
 }

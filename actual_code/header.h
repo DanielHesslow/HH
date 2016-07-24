@@ -225,8 +225,8 @@ unsigned int ptr_eq(void *a, void *b) {
 struct HistoryChangeTracker
 {
 	int next_index;
-	HistoryEntry prev_entry;
 };
+
 DEFINE_HashTable(BindingIdentifier, PVOID, silly_bind_ident_hash, bind_ident_eq)
 DEFINE_HashTable(PVOID, HistoryChangeTracker, silly_hash_void_ptr, ptr_eq)
 
