@@ -1719,31 +1719,10 @@ internal void fillBitmap(TextBuffer *textBuffer, Bitmap bitmap, int lineOffset,i
 	} 
 }
 
+void memset_32(int *dst, int value, int number_of_elements);
 internal void clearBitmap(Bitmap bitmap, int color)
 {
-	int size = bitmap.width*bitmap.height*bitmap.bytesPerPixel;
-#if 0
-	memset(bitmap.memory, color, size);
-
-	//memset is 5x way faster than the below
-	//but only works on bytes... //so our background can only be gray...
-	//also it deos not handle stride
-	//allocate a clear slate buffer 
-	//and use memcpy?? 
-	//or maybe use fill 4 bytes and then in memcopy to twice the size and continue.. maybe?
-
-#else
-	uint8 *row = (uint8 *)bitmap.memory;
-	for (int y = 0; y < bitmap.height; ++y)
-	{
-		uint32 *pixel = (uint32 *)row;
-		for (int x = 0; x <bitmap.width; ++x)
-		{
-			*pixel++ = color;
-		}
-		row += bitmap.stride;
-	}
-#endif
+	renderRect(bitmap, 0, 0, bitmap.width, bitmap.height, color);
 }
 
 
@@ -1775,6 +1754,77 @@ internal inline __m128i div255(__m128i x)
 
 	return x;
 }
+
+
+
+
+// --- SIMD ---
+
+// compared to memset (which can't to 4 byte elements obviously)
+// about to 2x faster at 100 elements on my machene
+// about equal att 300
+// down to .6x at 1000 elements
+
+internal void memset_32(int *dst, int value, int number_of_values)
+{
+	__m128i sse_value = _mm_set1_epi32(value);
+	__m128i write_all = _mm_set1_epi8(0xff);
+	__m128i count_down = _mm_set_epi32(3, 2, 1, 0);
+
+	for (; number_of_values >= 16; number_of_values -= 16, dst += 16)
+	{
+		_mm_prefetch((char *)dst, _MM_HINT_NTA);
+		_mm_storeu_si128((__m128i *)dst, sse_value);
+		_mm_storeu_si128((__m128i *)(dst + 4), sse_value);
+		_mm_storeu_si128((__m128i *)(dst + 8), sse_value);
+		_mm_storeu_si128((__m128i *)(dst + 12), sse_value);
+	}
+	for (; number_of_values > 3; number_of_values -= 4, dst += 4)
+	{
+		_mm_storeu_si128((__m128i *)dst, sse_value);
+	}
+
+	switch (number_of_values)
+	{
+	case 3:
+		dst[2] = value;
+	case 2:
+		dst[1] = value;
+	case 1:
+		dst[0] = value;
+	}
+}
+
+uint64_t get_clock_cycle()
+{
+	LARGE_INTEGER timeStamp_li;
+	QueryPerformanceCounter(&timeStamp_li);
+	return timeStamp_li.QuadPart;
+}
+
+internal float test_memset(int *mine, int *std)
+{
+	int arr[20000];
+	int len=1000;
+	int tests = 2000;
+	uint64_t start = get_clock_cycle();
+	for (int i = 0; i < tests; i++)
+	{
+		memset_32(arr, 5, len);
+	}
+	uint64_t mid = get_clock_cycle();
+	for (int i = 0; i < tests; i++)
+	{
+		memset(arr, 5, len*sizeof(int));
+	}
+	uint64_t end = get_clock_cycle();
+	*mine = (int)mid - start;
+	*std = (int)end- mid;
+	volatile float mine_times_faster = (float)(*std)/ (float)(*mine);
+	return mine_times_faster;
+}
+
+
 
 // bliting a char bitmap 8 pixels at a time. x is specified in thirds of a pixel granuality, y is specified in whole pixel granuality.
 internal void blitChar(CharBitmap from, Bitmap to, int x, int y, int color)
@@ -1832,7 +1882,7 @@ internal void blitChar(CharBitmap from, Bitmap to, int x, int y, int color)
 					__m128i alpha_g = _mm_unpacklo_epi8(alpha_g_packed_8, SSE_0);
 					__m128i alpha_b = _mm_unpacklo_epi8(alpha_g_packed_8, SSE_0);
 					
-					// calc correct write mask.
+					// calculate the write mask.
 					__m128i max = _mm_set1_epi16(min(from.width - x, to.width - x - xOffset / 3));
 					__m128i min = _mm_set1_epi16(x+xOffset/3);
 					__m128i count_down = _mm_set_epi16(7, 6, 5, 4, 3, 2, 1, 0);
@@ -2067,7 +2117,7 @@ internal void renderCharacter(Bitmap bitmap, char32_t code_point, CharRenderingI
 
 internal void renderCaret(Bitmap bitmap, int x, int y,float scale,Typeface::Font *typeface,int color)
 {
-	int width = getCharacterWidth_std('|', 'A', typeface, scale);
+	int width = getCharacterWidth_std('|', ' ', typeface, scale);
 	
 	renderCharacter(bitmap, '|', x - width / 2, y,scale, color, typeface); //use ascent / descent probably.
 }
@@ -2112,102 +2162,25 @@ internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int co
 
 
 
+
 internal void renderRect(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color)
 {
 	char *row = (char *)bitmap.memory + yOffset*bitmap.stride +xOffset*bitmap.bytesPerPixel;
 	width = min(width, bitmap.width - min(xOffset,bitmap.width));
+	height = min(height, bitmap.height - min(yOffset, bitmap.height));
 	for (int y = 0; y<height; y++)
 	{
-		if ((y + yOffset) >= bitmap.height)
-		{
-			return;
-		}
-		if ((y + yOffset)< 0)
+		if ((y + yOffset)< 0) //move out to speed up.
 		{
 			row += bitmap.stride;
 		}
 		else
 		{
-			memset(row, color, width * bitmap.bytesPerPixel);
-			/*
-			int  *pixel = (int *)row;
-			for (int x = 0; x<width; x++)
-			{
-				*pixel++ = color;
-			}
-			*/
-			row += bitmap.stride;
-		}
-	}
-	
-	/*
-	char *row = (char *)bitmap.memory+yOffset*bitmap.stride+xOffset*bitmap.bytesPerPixel;
-	for (int y = 0; y<height; y++)
-	{
-		if ((y + yOffset) >= bitmap.height)
-		{
-			return;
-		}
-		
-		if ((y + yOffset)< 0)
-		{
-			row += bitmap.stride;
-		}
-		else
-		{
-			int  *pixel = (int *)row;
-			
-			for (int x = 0; x<width; x++)
-			{
-				if (!((x + xOffset) >= bitmap.width || (x + xOffset) < 0))
-				{
-					*pixel = color;
-				}
-				++pixel;
-			}
-			row += bitmap.stride;
-		}
-	}
-	*/
-}
-
-
-internal void renderRectColor(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color)
-{
-	char *row = (char *)bitmap.memory+yOffset*bitmap.stride+xOffset*bitmap.bytesPerPixel;
-	for (int y = 0; y<height; y++)
-	{
-		if ((y + yOffset) >= bitmap.height)
-		{
-			return;
-		}
-
-		if ((y + yOffset)< 0)
-		{
-			row += bitmap.stride;
-		}
-		else
-		{
-			int  *pixel = (int *)row;
-
-			for (int x = 0; x<width; x++)
-			{
-				if (!((x + xOffset) >= bitmap.width || (x + xOffset) < 0))
-				{
-					*pixel = color;
-				}
-				++pixel;
-			}
+			memset_32((int *)row, color, width);
 			row += bitmap.stride;
 		}
 	}
 }
-
-internal void renderRectColor(Bitmap bitmap, Rect rect, int color)
-{
-	renderRectColor(bitmap, rect.x, rect.y, rect.width, rect.height, color);
-}
-
 
 internal void renderRect(Bitmap bitmap, Rect rect, int color)
 {
@@ -2463,7 +2436,7 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 		rect.width = bitmap.width;
 		rect.x = 0;
 		rect.y =  0;
-		renderRectColor(bitmap, rect, color);
+		renderRect(bitmap, rect, color);
 	}
 	if (bottom > 0)
 	{
@@ -2472,7 +2445,7 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 		rect.width = bitmap.width;
 		rect.x = 0;
 		rect.y = max(0,bitmap.height-bottom);
-		renderRectColor(bitmap, rect, color);
+		renderRect(bitmap, rect, color);
 	}
 	if (left>0)
 	{
@@ -2481,7 +2454,7 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 		rect.width = min(bitmap.width, left);
 		rect.x = 0;
 		rect.y = 0;
-		renderRectColor(bitmap, rect, color);
+		renderRect(bitmap, rect, color);
 	}
 	if (right>0)
 	{
@@ -2490,7 +2463,7 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 		rect.width = min(bitmap.width, right);
 		rect.x = max(0,bitmap.width-right);
 		rect.y = 0;
-		renderRectColor(bitmap, rect, color);
+		renderRect(bitmap, rect, color);
 	}
 	return margin(bitmap, left, right, top, bottom);
 }
@@ -2706,9 +2679,9 @@ bool colorIsDirty=true;
 internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int x, int y,bool isActive)
 {
 	if(isActive)
-		renderRectColor(bitmap, 0, 0, bitmap.width, bitmap.height, activeColor);
+		renderRect(bitmap, 0, 0, bitmap.width, bitmap.height, activeColor);
 	else
-		renderRectColor(bitmap, 0, 0, bitmap.width, bitmap.height, backgroundColors[0]);
+		renderRect(bitmap, 0, 0, bitmap.width, bitmap.height, backgroundColors[0]);
 
 	char string[400];
 	//int pos = getLeftCaretIndex(&buffer->backingBuffer->buffer);

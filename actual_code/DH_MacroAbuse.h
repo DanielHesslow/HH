@@ -43,6 +43,11 @@ OutputDebugString(OutputDebugString_buffer);
 sprintf(OutputDebugString_buffer, ":\"%s\" (" DHMA_STRING_(__LINE__) ", " __FILE__ ")\n", s);\
 OutputDebugString(OutputDebugString_buffer);
 
+#define dprf(f)\
+sprintf(OutputDebugString_buffer, DHMA_STRING(f) ": %f (" DHMA_STRING_(__LINE__) ", " __FILE__ ")\n", f);\
+OutputDebugString(OutputDebugString_buffer);
+
+
 
 
 

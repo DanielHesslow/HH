@@ -2,7 +2,7 @@
 #define ColorScheme
 #if 1
 //dark scheme
-uint32 backgroundColors[] = { 0x00272727, 0x00232323, 0x00191919 };
+uint32 backgroundColors[] = { 0x00272738, 0x00233323, 0x00251919 };
 
 //int background = 0xff262721; (sublime color isch)
 int highlightColor = 0x00333333;
