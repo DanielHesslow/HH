@@ -298,7 +298,6 @@ internal int getLines(BackingBuffer *buffer)
 	return buffer->lines;
 }
 
-
 internal void updateLineData(TextBuffer *textBuffer)
 {
 	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
@@ -1507,30 +1506,11 @@ internal void removeCaret(TextBuffer *buffer, int caretIdIndex, bool log)
 
 internal TextBuffer cloneTextBuffer(TextBuffer *buffer)
 {
-	TextBuffer ret = {};
-	assert(false);
-	return ret;
-	/*
-	stbtt_fontinfo *fontinfo = (stbtt_fontinfo *)alloc_(sizeof(stbtt_fontinfo), "fontinfo_info");
-	*fontinfo = {};
-	fontinfo->userdata = (void *)"stbtt_allocation";
-	Typeface font = {};
-	font.font_info = fontinfo;
-	ret.ownedCarets_id = constructDynamicArray_int(20, "ownedCaretIds");
-	ret.ownedSelection_id = constructDynamicArray_int(20, "ownedSelectionIds");
-	ret.cursorInfo= constructDynamicArray_CursorInfo(20, "cursor info");
-	 
-	ret.KeyBindings = constructDynamicArray_KeyBinding(20, "keyBindings");
-	ret.contextCharWidthHook = constructDynamicArray_ContextCharWidthHook(20, "contextCharWidthHook");
-	ret.bufferType = buffer->bufferType;
-	ret.backingBuffer = buffer->backingBuffer;
-	ret.font= font;
-	ret.fileName = strcpy(buffer->fileName);
-	AddCaret(&ret, getCaretPos(buffer->backingBuffer->buffer, buffer->ownedCarets_id.start[0]));
-	initTextBuffer(&ret);
-	return ret;
-	*/
-	
+	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
+	attatch_BackingBuffer(&textBuffer, buffer->backingBuffer);
+	textBuffer.fileName = buffer->fileName; //COPY ME??
+	initTextBuffer(&textBuffer); //setting user_specified_bindings + adding the correct cursors
+	return textBuffer;
 }
 
 
@@ -1578,7 +1558,7 @@ internal TextBuffer openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
 	if(*success)
 	{
 		attatch_BackingBuffer(&textBuffer, bb);
-		textBuffer.fileName = fileName; //COPY ME??
+		textBuffer.fileName = fileName; //WE'RE totaly leaking this.
 		redoLineSumTree(textBuffer.backingBuffer);
 		initTextBuffer(&textBuffer); //setting user_specified_bindings
 		return textBuffer;
@@ -1595,8 +1575,6 @@ internal void getFileWriteTime_PLATFORM(char *fileName)
 	FILETIME *fileTime;
 	GetFileTime(hFile, 0, 0, fileTime);
 }
-
-
 
 internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String path)
 {
@@ -2004,7 +1982,6 @@ long long unsigned int charBitmapIdentifier(float scale, int codepoint)
 	return codepoint | int_scale;
 }
 
-
 CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 {
 	int xOff, yOff;
@@ -2014,11 +1991,11 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 
 	//stride's additional 2 comes from where exactey, hadn't we allready taken that into account?
 	int width, height;
-	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale * 3, scale, glyph_index, &width, &height, &xOff, &yOff);
-	float die_off = 1.2; // [1.5,2]
+	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale * 3, scale, glyph_index, &width, &height, &xOff, &yOff); //statically allocate a bunch here?
+	float die_off = 1.5; // [1.5,2]
 	float intensity = 1;
-	float subpix_bleed[] = { .5f * intensity / 3, .5f *die_off *intensity / 3 , .5f *intensity / (3 * die_off) };
-
+	float subpix_bleed[] = { .5f *die_off * intensity / 3, .5f *intensity / 3 , .5f *intensity / (3 * die_off) };
+	
 	int bleed_extra_per_row = ciel_divide((ARRAY_LENGTH(subpix_bleed) - 1) * 2, 3);
 	int color_stride = (ciel_divide(width + 2, 3) + bleed_extra_per_row) + 1;
 
@@ -2038,14 +2015,13 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 
 		for (int x = 0; x < width; x++)
 		{
-			//colors[x % 3][x/3 + y*color_stride+1] += *pix_from * subpix_bleed[0];
 			for (int i = 0; i < (ARRAY_LENGTH(subpix_bleed)); i++)
 			{
 				uint8 *r = &colors[(x + i) % 3][(x + i + 3) / 3 + y*color_stride];
 				uint8 *l = &colors[(x + 3 - i) % 3][(x - i + 3) / 3 + y*color_stride];
-				int v = *pix_from *subpix_bleed[i];
+				int v = *pix_from * subpix_bleed[i];
 
-				*r = ((int)*r) + v > 255 ? 255 : *r + v; // saturate which means we can add more than one total for every pixel (which we want to do)
+				*r = ((int)*r) + v > 255 ? 255 : *r + v; // saturate which means we can add more than one total for every pixel (which might(?) we want to do)
 				*l = ((int)*l) + v > 255 ? 255 : *l + v;
 			}
 			++pix_from;
@@ -2053,7 +2029,7 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 		row_from += width;
 	}
 
-	free_(charBitmapMem);
+	free_(charBitmapMem); 
 	CharBitmap b = {};
 	b.character = codepoint;
 	b.scale = scale;
@@ -2086,7 +2062,6 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 	else
 		return loadBitmap(codepoint, scale, font); 
 }
-
 
 struct CharRenderingInfo
 {
@@ -2121,24 +2096,8 @@ internal void renderCaret(Bitmap bitmap, int x, int y,float scale,Typeface::Font
 	renderCharacter(bitmap, '|', x - width / 2, y,scale, color, typeface); //use ascent / descent probably.
 }
 
-
 //		----	LOGIC
 
-internal void renderText(Bitmap bitmap, char* string, float scale, int color, int x, int y, Typeface::Font *font)
-{
-	int remaining_len = DHSTR_strlen(string);
-	char32_t last_codepoint = 0;
-	while (*string)
-	{
-		char32_t codepoint;
-		remaining_len -= codepoint_read(string, remaining_len, (uint32_t *)&codepoint);
-		if(last_codepoint)
-			x += getCharacterWidth_std(last_codepoint,codepoint, font, scale);
-		renderCharacter(bitmap, codepoint, x, y, scale, color, font);
-		last_codepoint = codepoint;
-		++string;
-	}
-}
 
 internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int color, int x, int y, Typeface::Font *font)
 {
@@ -2155,12 +2114,6 @@ internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int co
 		i += read;
 	}
 }
-
-
-
-
-
-
 
 internal void renderRect(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color)
 {
@@ -2309,6 +2262,40 @@ internal void bigTitles(TextBuffer *textBuffer, CharRenderingInfo *settings, int
 typedef void(*LineChangeHook)(TextBuffer *textBuffer, CharRenderingInfo *settings, int currentLine);
 
 
+enum CharRenderingChangeType
+{
+	rendering_change_scale,
+	rendering_change_color,
+	rendering_change_font,
+};
+
+
+struct CharRenderingChange
+{
+	Location location;
+	void *owner;
+	CharRenderingChangeType type;
+	union
+	{
+		float scale;
+		int color;
+		Typeface::Font *font;
+	};
+};
+
+inline int cmp_int(int a, int b)
+{
+	return (a > b) - (a < b); //+1,-1, 0 are possible return values
+}
+
+inline int cmpCharRenderingChange(void *v_a, void *v_b)
+{
+	CharRenderingChange a = *(CharRenderingChange *)v_a;
+	CharRenderingChange b = *(CharRenderingChange *)v_b;
+	return cmp_int(a.location.line, b.location.line) << 1 & cmp_int(a.location.column, b.location.column); //returns 3, 2, 1, 0, -1,-2 -3
+}
+DEFINE_Complete_ORD_DynamicArray(CharRenderingChange, cmpCharRenderingChange);
+
 internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret, 
 	LineChangeHook *lineChangeFuncs=0, int NumberOfLineChangeFuncs=0)
 {
@@ -2351,11 +2338,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			ended = !MoveIterator(mgb, &it, read);
 			
 			bool lineBreak= isLineBreak(codepoint);
-			if (codepoint == '\r' && !lineBreak)
-			{
-				int q = 3;
-			}
-
+			
 			{
 				int width = 0;
 				if (last_codepoint != 0){
@@ -2366,7 +2349,6 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.typeface->ascent*rendering.scale, (width + 2) / 3, rendering.typeface->lineHeight*rendering.scale, highlightColor);
 				}
 				rendering.x += width;
-
 				if(!lineBreak)
 					renderCharacter(bitmap, codepoint, rendering);
 			}
@@ -2426,6 +2408,7 @@ internal Bitmap margin(Bitmap bitmap, int left, int right, int top, int bottom)
 	r.y = top;
 	return subBitmap(bitmap, r);
 }
+
 internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bottom, int color)
 {
 	if (top > 0)
@@ -2690,7 +2673,7 @@ internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int 
 	// bad, these allocations are completely unnessesary.. (and the only two we do every frame)
 	DHSTR_String allocationInfo = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING(string), buffer->fileName);
 	
-	renderText(bitmap, DHSTR_UTF8_FROM_STRING(allocationInfo,alloca), scale, foregroundColor, x, y, buffer->font);
+	renderText(bitmap, allocationInfo, scale, foregroundColor, x, y, buffer->font);
 	//the filename looks freed to me... :/
 	
 	/*
@@ -2758,7 +2741,7 @@ internal void renderAstExpr(Bitmap bitmap, AST_EXPR expr, int offX, int offY, Ty
 }
 #endif
 
-typedef  void(*RequestString)(void *base_node, void *node, char* buffer, size_t buffer_len);
+typedef  DHSTR_String (*RequestString)(void *base_node, void *node, char* buffer, size_t buffer_len);
 typedef bool(*RequestNodeChild)(void *base_node, void *node, int index, void **_out_child);
 struct NodeInterface
 {
@@ -2800,11 +2783,9 @@ internal void renderNodeCentered(Bitmap bitmap, void *node, int offX, int offY, 
 	
 	const int buffer_len = 40;
 	char buffer[buffer_len];
-	nodeInterface.getName(data, node, buffer, buffer_len);
-	renderText(b, buffer, 0.012, foregroundColor, 2, 15, font );
+	renderText(b, nodeInterface.getName(data, node, buffer, buffer_len), 0.012, foregroundColor, 2, 15, font );
 
-	nodeInterface.getText(data, node, buffer, buffer_len);
-	renderText(b, buffer, 0.008, foregroundColor, 2, 30, font);
+	renderText(b, nodeInterface.getText(data, node, buffer, buffer_len), 0.008, foregroundColor, 2, 30, font);
 }
 
 internal void renderTree(Bitmap bitmap, void *node, int offX, int offY, Typeface::Font *typeface, NodeInterface nodeInterface, void *data_passed_to_interface_funcs)
@@ -2890,6 +2871,7 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 				sprintf(buffer, "%s", stringFromAction(entry.action)); //@unsafe
 				break;
 			}
+			return DHSTR_MAKE_STRING(buffer);
 		};
 
 		nodeInterface.getName = [](void *phistory, void *node, char* buffer, size_t buffer_len) {
@@ -2897,6 +2879,7 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 			char *base_node = (char *)history->entries.start;
 			int index = (((char *)node) - ((char *)base_node)) / sizeof(HistoryEntry);
 			sprintf(buffer, "%d", index);//@unsafe
+			return DHSTR_MAKE_STRING(buffer);
 		};
 
 		nodeInterface.getChild = [] (void *phistory, void *node, int index, void **_out_child)

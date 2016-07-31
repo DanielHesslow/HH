@@ -176,12 +176,10 @@ void undo_history_event(TextBuffer *textBuffer, HistoryEntry prev_entry)
 
 
 
-bool can_redo(History *history)
-{
+bool can_redo(History *history){
 	return history->current_index < history->entries.length;
 }
-bool can_undo(History *history)
-{
+bool can_undo(History *history){
 	return history->current_index > 0;
 }
 
