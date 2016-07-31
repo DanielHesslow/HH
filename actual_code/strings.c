@@ -563,28 +563,27 @@ enum sprintf_flags
 	sprintf_left_pad_zero = 1 << 4,
 };
 
-typedef int(*_sprint_type_length)(void *p_value, int flags, int precision);
-typedef void (*_sprint_type_print)(void *p_value, char *start, int truncated_length, int flags, int precision);
-#define _SPRINTF_PRINTER(_func_name_) void _func_name_ (void *p_value, char *start, int trunc_len, int flags, int precision)
+typedef void(*_sprint_type_print)(void *p_value, char *buffer, int *write_index, int buffer_length, int flags, int precision);
+#define _SPRINTF_PRINTER(_func_name_) void _func_name_ (void *p_value, char *buffer, int *write_index, int buffer_length, int flags, int precision)
 
-void _sprintf_base_int(char *buffer, int buffer_len, int *b, void *value, int flags, int width, int precision, 
-	_sprint_type_length length, _sprint_type_print print,
-	_sprint_type_length length_sign, _sprint_type_print print_sign)
+void _sprintf_base(char *buffer, int buffer_len, int *b, void *value, int flags, int width, int precision, 
+	_sprint_type_print print,
+	_sprint_type_print print_sign)
 {
 	
 	int sign_len = 0;
-	if (length_sign)
+	if (print_sign)
 	{
-		sign_len = length_sign(value, flags, precision);
+		print_sign(value, (char *)0, &sign_len, -1, flags, precision);
 		width -= sign_len;
 	}
-	if (sign_len && (flags & sprintf_left_pad_zero)) // if we're padding with zero the sign needs to be before
+	if (print_sign && (flags & sprintf_left_pad_zero)) // if we're padding with zero the sign needs to be before
 	{
-		print_sign(value, &buffer[*b], sign_len, flags, precision);
-		*b += sign_len;
+		print_sign(value, buffer, b, buffer_len, flags, precision);
 	}
 
-	int len = length(value,flags, precision);
+	int len = 0;
+	print(value, (char *)0, &len, -1, flags, precision);
 	len = min(buffer_len - *b, len);  // cap to end of buffer
 	
 	if (width != -1 && !(flags & sprintf_left_justify)) // left pad
@@ -597,14 +596,12 @@ void _sprintf_base_int(char *buffer, int buffer_len, int *b, void *value, int fl
 		}
 	}
 
-	if (sign_len && !(flags & sprintf_left_pad_zero)) //if we're padding with spaces it should be after
+	if (print_sign && !(flags & sprintf_left_pad_zero)) //if we're padding with spaces it should be after
 	{
-		print_sign(value, &buffer[*b], sign_len, flags, precision);
-		*b += sign_len;
+		print_sign(value, buffer, b, buffer_len, flags, precision);
 	}
 
-	print(value, &buffer[*b], len,flags, precision);
-	*b += len;  // set to end;
+	print(value, buffer, b, buffer_len, flags, precision);
 
 	if (width != -1 && (flags & sprintf_left_justify)) // right pad
 	{
@@ -636,154 +633,161 @@ int _sprintf_integer_sign_len(void *p_value, int flags, int precision)
 _SPRINTF_PRINTER(_sprintf_integer_sign_print)
 {
 	uintmax_t value = *(uintmax_t *)p_value;
-	if (!trunc_len)return;
+	if (buffer_length <= *write_index && buffer_length != -1)return;
 	if ((intmax_t)value < 0) { // write negative sign if needed
-		*start= '-';
+		if(buffer) buffer[*write_index]='-';
+		++*write_index;
 	}
 	else if (flags & sprintf_force_plus_minus) // write positive if flag is set
 	{
-		*start = '+';
+		if (buffer) buffer[*write_index] = '+';
+		++*write_index;
 	}
 	else if (flags & sprintf_fill_missing_sign) // write space if specified
 	{
-		*start = ' ';
+		if (buffer) buffer[*write_index] = '*';
+		++*write_index;
 	}
-
 }
-
-int _sprintf_integer_len(void *p_value, int flags, int precision)
-{
-	uintmax_t value = *(uintmax_t *)p_value;
-	int len = 1;
-	while (value /= 10) ++len; // number of digits
-	return len;
-}
-
 _SPRINTF_PRINTER(_sprintf_integer_print)
 {
 	uintmax_t value = *(uintmax_t *) p_value;
-	for (int i = trunc_len - 1; i >= 0; i--) // write number backwards
+	uintmax_t value_cpy = value;
+	int len = 0;
+	do
 	{
-		start[i] = value % 10 + '0';
+		value_cpy /= 10;
+		++len;
+	} while (value_cpy);
+	*write_index += len - 1;
+	do // write number backwards
+	{
+		if (buffer_length <= *write_index && buffer_length != -1)return;
+		if(buffer) buffer[*write_index] = value % 10 + '0';
+		--*write_index;
 		value /= 10;
-	}
-}
-
-int _sprintf_integer_signed_len(void *p_value, int flags, int precision)
-{
-	intmax_t sval = *(intmax_t *)p_value;
-	sval = sval < 0 ? -sval : sval; // abs
-	return _sprintf_integer_len(p_value, flags,precision);
+	} while (value);
+	*write_index += len+1;
 }
 
 _SPRINTF_PRINTER(_sprintf_integer_signed_print)
 {
 	intmax_t sval = *(intmax_t *)p_value;
 	sval = sval < 0 ? -sval : sval; // abs
-	_sprintf_integer_print(p_value, start, trunc_len,flags, precision);
+	_sprintf_integer_print(&sval, buffer, write_index, buffer_length, flags, precision);
 }
 
 void _sprintf_integer_unsigned(char *buffer, int buffer_len, int *b, uintmax_t value, int flags, int width, int precision)
 {
-	_sprintf_base_int(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_integer_len, _sprintf_integer_print,0,0);
+	_sprintf_base(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_integer_print, 0);
 }
 
 void _sprintf_integer_signed(char *buffer, int buffer_len, int *b, uintmax_t value, int flags, int width, int precision)
 {
-	_sprintf_base_int(buffer, buffer_len, b, &value, flags, width, precision,_sprintf_integer_signed_len, _sprintf_integer_signed_print, _sprintf_integer_sign_len, _sprintf_integer_sign_print);
-}
-
-int _sprintf_hex_len(void * p_value, int flags, int precision)
-{
-	uintmax_t value = *(uintmax_t *)p_value;
-	int len = 1;
-	while (value >>= 4) ++len; // number of digits
-	return len;
-}
-
-int hex_integer_sign_len(void *p_value, int flags, int precision)
-{
-	uintmax_t value = *(uintmax_t *)p_value;
-	return flags & sprintf_hashtag ? 2 : 0;
+	_sprintf_base(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_integer_signed_print, _sprintf_integer_sign_print);
 }
 
 _SPRINTF_PRINTER(hex_integer_sign_print_lower)
 { // hex prefix behaves as a sign
 	uintmax_t value = *(uintmax_t *)p_value;
-	if (!(flags & sprintf_hashtag)||trunc_len < 2)return;
-	start[0] = '0';
-	start[1] = 'x';
+	if (!(flags & sprintf_hashtag))return;
+	if (buffer_length <= *write_index && buffer_length != -1)return;
+	if(buffer) buffer[*write_index] = '0';
+	++*write_index;
+	if (buffer_length <= *write_index && buffer_length != -1)return;
+	if (buffer) buffer[*write_index] = 'x';
+	++*write_index;
 }
 
-void hex_integer_sign_print_upper(void *p_value, char *start, int trunc_len, int flags, int precision)
+_SPRINTF_PRINTER(hex_integer_sign_print_upper)
 {// hex prefix behaves as a sign
 	uintmax_t value = *(uintmax_t *)p_value;
-	if (!(flags & sprintf_hashtag)|| trunc_len < 2)return;
-	start[0] = '0';
-	start[1] = 'X';
+	if (!(flags & sprintf_hashtag))return;
+	if (buffer_length <= *write_index && buffer_length != -1)return;
+	if (buffer) buffer[*write_index] = '0';
+	++*write_index;
+	if (buffer_length <= *write_index && buffer_length != -1)return;
+	if (buffer) buffer[*write_index] = 'X';
+	++*write_index;
 }
 
 _SPRINTF_PRINTER(_sprintf_hex_print_upper)
 {
 	uintmax_t value = *(uintmax_t *)p_value;
-	for (int i = trunc_len - 1; i >= 0; i--) // write number backwards
+	uintmax_t value_cpy = value;
+	int len = 0;
+	do
+	{
+		value_cpy >>= 4;
+		++len;
+	} while (value_cpy);
+	*write_index += len - 1;
+	do // write number backwards
 	{
 		int curr = value & 0x0f;
-		if(curr <= 9)
-			start[i] = curr % 10 + '0';
-		else
-			start[i] = curr - 10  + 'A';
+		if (buffer_length <= *write_index && buffer_length != -1)return;
+		if (buffer) buffer[*write_index] = (curr <= 9) ? curr + '0' : curr - 10 + 'A';
+		--*write_index;
 		value >>= 4;
-	}
+	} while (value);
+	*write_index += len + 1;
 }
 
 _SPRINTF_PRINTER(_sprintf_hex_print_lower)
 {
 	uintmax_t value = *(uintmax_t *)p_value;
-	for (int i = trunc_len - 1; i >= 0; i--) // write number backwards
+	uintmax_t value_cpy = value;
+	int len = 0;
+	do
+	{
+		value_cpy >>= 4;
+		++len;
+	} while (value_cpy);
+	*write_index += len - 1;
+	do // write number backwards
 	{
 		int curr = value & 0x0f;
-		if (curr <= 9)
-			start[i] = curr % 10 + '0';
-		else
-			start[i] = curr - 10 + 'a';
+		if (buffer_length <= *write_index && buffer_length != -1)return;
+		if (buffer) buffer[*write_index] = (curr <= 9) ? curr + '0' : curr - 10 + 'a';
+		--*write_index;
 		value >>= 4;
-	}
-}
-
-int _sprintf_octal_len(void *p_value, int flags, int precision)
-{
-	uintmax_t value = *(uintmax_t *)p_value;
-	int len = 1;
-	while (value >>= 3) ++len; // number of digits
-	return len;
+	} while (value);
+	*write_index += len + 1;
 }
 
 _SPRINTF_PRINTER(_sprintf_octal_print)
 {
 	uintmax_t value = *(uintmax_t *)p_value;
-	for (int i = trunc_len - 1; i >= 0; i--) // write number backwards
+	uintmax_t value_cpy = value;
+	int len = 0;
+	do //get length
+	{
+		value_cpy >>= 3;
+		++len;
+	} while (value_cpy);
+
+	*write_index += len - 1;
+	do // write number backwards
 	{
 		int curr = value & 0x07;
-		start[i] = curr % 10 + '0';
+		if (buffer_length <= *write_index && buffer_length != -1)return;
+		if (buffer) buffer[*write_index] = curr + '0';
+		--*write_index;
 		value >>= 3;
-	}
+	} while (value);
+	*write_index += len + 1;
 }
 
 void _sprintf_hex_lower(char *buffer, int buffer_len, int *b, uintmax_t value, int flags, int width, int precision)
 {
-	_sprintf_base_int(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_hex_len, _sprintf_hex_print_lower, hex_integer_sign_len, hex_integer_sign_print_lower);
+	_sprintf_base(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_hex_print_lower, hex_integer_sign_print_lower);
 }
 
 void _sprintf_hex_upper(char *buffer, int buffer_len, int *b, uintmax_t value, int flags, int width, int precision)
 {
-	_sprintf_base_int(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_hex_len, _sprintf_hex_print_upper, hex_integer_sign_len, hex_integer_sign_print_upper);
+	_sprintf_base(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_hex_print_upper, hex_integer_sign_print_upper);
 }
 
-void _sprintf_octal(char *buffer, int buffer_len, int *b, uintmax_t value, int flags, int width, int precision)
-{
-	_sprintf_base_int(buffer, buffer_len, b, &value, flags, width,precision, _sprintf_octal_len, _sprintf_octal_print, 0, 0);
-}
 
 enum FloatFlag
 {
@@ -824,7 +828,7 @@ void extract_double_values(double value, long long int *mantissa, long int *exp,
 	}
 }
 
-void _print_double(char *buffer, int buffer_length, double value, int precision)
+void _print_double(char *buffer, int buffer_length, int *write_index, double value, int precision)
 {
 	double pre_dot_digits__d = value <= 0 ? 1 : floor(log10(value)+1);
 	int pre_dot_digits = (int)pre_dot_digits__d;
@@ -834,7 +838,8 @@ void _print_double(char *buffer, int buffer_length, double value, int precision)
 	for (int i = 0; i < precision;i++)vp *= 10;
 	for (int i = 1; i <= precision; i++)
 	{
-		buffer[precision + dot + pre_dot_digits - i] = '0'+((int)vp) % 10;
+		if(buffer)
+		buffer[*write_index + precision + dot + pre_dot_digits - i] = '0'+((int)vp) % 10;
 		vp /= 10;
 	}
 	buffer[pre_dot_digits + dot-1] = '.';
@@ -845,6 +850,16 @@ void _print_double(char *buffer, int buffer_length, double value, int precision)
 	}
 }
 
+void _sprintf_print_string(char *buffer, int buffer_length, int *write_index, char *string)
+{
+	int len = strlen(string);
+	for (int i = 0; i < len; i++)
+	{
+		if (buffer_length <= *write_index && buffer_length != -1)return;
+		if(buffer) buffer[*write_index] = string[i];
+		++*write_index;
+	}
+}
 _SPRINTF_PRINTER(_sprintf_double_print_lowercase)
 {
 	double value = *(double *)p_value;
@@ -853,97 +868,40 @@ _SPRINTF_PRINTER(_sprintf_double_print_lowercase)
 	extract_double_values(value, &mantissa, &exp, &sign, &float_flag);
 	if (float_flag == float_inf)
 	{
-		start[0] = 'i';
-		start[1] = 'n';
-		start[2] = 'f';
-		start[3] = 'i';
-		start[4] = 'n';
-		start[5] = 'i';
-		start[6] = 't';
-		start[7] = 'e';
+		_sprintf_print_string(buffer, buffer_length, write_index, "infinite");
 	}
 	else if (float_flag == float_nan)
 	{
-		start[0] = 'N';
-		start[1] = 'a';
-		start[2] = 'N';
+		_sprintf_print_string(buffer, buffer_length, write_index, "NaN");
 	}
 	else if (float_flag == float_denormalized)
 	{
-		start[0] =  'd';
-		start[1] =  'e';
-		start[2] =  'n';
-		start[3] =  'o';
-		start[4] =  'r';
-		start[5] =  'm';
-		start[6] =  'a';
-		start[7] =  'l';
-		start[8] =  'i';
-		start[9] =  'z';
-		start[10] = 'e';
-		start[11] = 'd';
+		_sprintf_print_string(buffer, buffer_length, write_index, "denormalized");
 	}
 	else
 	{
-		_print_double(start, trunc_len, value, precision);
+		_print_double(buffer, buffer_length,write_index, value, precision);
 	}
-}
-
-int _sprintf_double_len(void *p_value, int flags, int precision)
-{
-	double value = *(double *)p_value;
-	long long int mantissa; long int exp; bool sign;
-	FloatFlag float_flag;
-	extract_double_values(value, &mantissa, &exp, &sign,&float_flag);
-	if (float_flag == float_inf)
-	{
-		return 8; // "infinite" is 8 character
-	}
-	else if (float_flag == float_nan)
-	{
-		return 3;
-	}
-	else if (float_flag == float_denormalized)
-	{
-		return 12; //denormalized
-	}
-	else
-	{
-		int pre_dot_digits = value <= 0 ? 1 : floor(log10(value) + 1);
-		return pre_dot_digits + 1 + precision;
-	}
-}
-
-int _sprintf_double_sign_len(void *p_value, int flags,int precision)
-{
-	double value = *(double *)p_value;
-	if ((intmax_t)value < 0 || (flags & sprintf_force_plus_minus) || (flags & sprintf_fill_missing_sign)) // write space if specified
-	{
-		return 1;
-	}
-	return 0;
 }
 
 _SPRINTF_PRINTER(_sprintf_double_sign_print)
 {
 	double value = *(double *)p_value;
-	if (!trunc_len)return;
+	if (buffer_length <= *write_index && buffer_length != -1)return;
 	if ((intmax_t)value < 0) { // write negative sign if needed
-		*start = '-';
+		if (buffer) buffer[*write_index] = '-';
+		++*write_index;
 	}
 	else if (flags & sprintf_force_plus_minus) // write positive if flag is set
 	{
-		*start = '+';
+		if (buffer) buffer[*write_index] = '+';
+		++*write_index;
 	}
 	else if (flags & sprintf_fill_missing_sign) // write space if specified
 	{
-		*start = ' ';
+		if (buffer) buffer[*write_index] = '*';
+		++*write_index;
 	}
-}
-
-void _sprintf_float(char *buffer, int buffer_len, int *b, double value, int flags, int width, int precision)
-{
-	_sprintf_base_int(buffer, buffer_len, b, &value, flags, width, precision,_sprintf_double_len, _sprintf_double_print_lowercase, _sprintf_double_sign_len, _sprintf_double_sign_print);
 }
 
 _SPRINTF_PRINTER(_sprintf_double_print_scientific_lowercase)
@@ -954,35 +912,28 @@ _SPRINTF_PRINTER(_sprintf_double_print_scientific_lowercase)
 	extract_double_values(value, &mantissa, &exp, &sign, &float_flag);
 	if (float_flag == float_inf)
 	{
-		start[0] = 'i';
-		start[1] = 'n';
-		start[2] = 'f';
-		start[3] = 'i';
-		start[4] = 'n';
-		start[5] = 'i';
-		start[6] = 't';
-		start[7] = 'e';
+		const char *inf = "infinite";
+		for (int i = 0; i < strlen(inf); i++)
+		{
+			buffer[*write_index] = inf[i];
+		}
 	}
 	else if (float_flag == float_nan)
 	{
-		start[0] = 'N';
-		start[1] = 'a';
-		start[2] = 'N';
+		const char *NaN = "NaN";
+		for (int i = 0; i < strlen(NaN); i++)
+		{
+			buffer[*write_index] = NaN[i];
+		}
 	}
 	else if (float_flag == float_denormalized)
 	{
-		start[0] = 'd';
-		start[1] = 'e';
-		start[2] = 'n';
-		start[3] = 'o';
-		start[4] = 'r';
-		start[5] = 'm';
-		start[6] = 'a';
-		start[7] = 'l';
-		start[8] = 'i';
-		start[9] = 'z';
-		start[10] = 'e';
-		start[11] = 'd';
+		const char *denormalized = "denormalized";
+		for (int i = 0; i < strlen(denormalized); i++)
+		{
+			buffer[*write_index] = denormalized[i];
+		}
+
 	}
 	else
 	{
@@ -990,20 +941,14 @@ _SPRINTF_PRINTER(_sprintf_double_print_scientific_lowercase)
 		double b10_exp = log_10_of_2 * exp;
 		double b10_exp_round = round(b10_exp);
 		double significant = (((double)mantissa) / ((double)0x000fffffffffffff) + 1) * pow(10.0, b10_exp - b10_exp_round);
-		int i = 0;
-		_sprintf_float(start, trunc_len, &i, significant, sprintf_force_plus_minus, 0, precision);
-		start += i;
-		*start = 'e';
-		++start;
-		int q = 0;
-		_sprintf_float(start, trunc_len, &q, b10_exp_round, sprintf_force_plus_minus, 0, precision);
+		_sprintf_base(buffer, buffer_length, write_index, &significant, sprintf_force_plus_minus, 0, precision, _sprintf_double_print_lowercase, _sprintf_double_sign_print);
+		buffer[*write_index] = 'e';
+		++*write_index;
+		_sprintf_base(buffer, buffer_length, write_index, &b10_exp_round, sprintf_force_plus_minus, 0, precision, _sprintf_double_print_lowercase, _sprintf_double_sign_print);
+
 	}
 }
 
-void _sprintf_float_science(char *buffer, int buffer_len, int *b, double value, int flags, int width, int precision)
-{
-	_sprintf_base_int(buffer, buffer_len, b, &value, flags, width, precision, _sprintf_double_len, _sprintf_double_print_scientific_lowercase, _sprintf_double_sign_len, _sprintf_double_sign_print);
-}
 
 enum sprintf_length_modifier
 {
@@ -1147,8 +1092,13 @@ int DHSTR_snprintf(char *buffer, int buffer_len, char *format, ...)
 					f += 1;
 				}
 			}
-			intmax_t integer_value;
-			long double float_value;
+			union
+			{
+				intmax_t integer_value;
+				long double float_value;
+			};
+			void *value = &float_value;
+
 			switch (format[f])
 			{
 			case 'c':
@@ -1228,41 +1178,40 @@ int DHSTR_snprintf(char *buffer, int buffer_len, char *format, ...)
 			case 'i':
 			case 'd':
 			{
-				_sprintf_integer_signed(buffer, buffer_len, &b, integer_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_integer_signed_print, _sprintf_integer_sign_print);
 			}break;
 			case 'u':
 			{
-				_sprintf_integer_unsigned(buffer, buffer_len, &b, integer_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_integer_print, _sprintf_integer_sign_print);
 			}break;
 
 			case 'p': 
 			{
 				flags |= sprintf_hashtag | sprintf_left_pad_zero;// force the correct flags
-				width = sizeof(void *)*2+2; //+2 for the ox
-				_sprintf_hex_lower(buffer, buffer_len, &b, integer_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_hex_print_upper, hex_integer_sign_print_lower);
 				break;
 			}
 			case 'x':
 			{
-				_sprintf_hex_lower(buffer, buffer_len, &b, integer_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_hex_print_lower, hex_integer_sign_print_lower);
 			} break;
 
 			case 'X':
 			{
-				_sprintf_hex_upper(buffer, buffer_len, &b, integer_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_hex_print_upper, hex_integer_sign_print_upper);
 			} break;
 
 			case 'o':
 			{
-				_sprintf_octal(buffer, buffer_len, &b, integer_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_octal_print, 0);
 			} break;
 			case 'f':
 			{
-				_sprintf_float(buffer, buffer_len, &b, float_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_double_print_lowercase, _sprintf_double_sign_print);
 			} break;
 			case 'e':
 			{
-				_sprintf_float_science(buffer, buffer_len, &b, float_value, flags, width, precision);
+				_sprintf_base(buffer, buffer_len, &b, value, flags, width, precision, _sprintf_double_print_scientific_lowercase, _sprintf_double_sign_print);
 			} break;
 
 			// case f float
@@ -1287,19 +1236,24 @@ int DHSTR_snprintf(char *buffer, int buffer_len, char *format, ...)
 #endif
 	return b+1;
 }
+
 void test_the_printf()
 {
 	char buffer[1000];
-	double d = -1;
 	OutputDebugString("correct\n");
-	snprintf(buffer, ARRAY_LENGTH(buffer), "Hello, I'm '%e' years old.\n", d);
+	char *s1 = "Hello, I'm '%f' years old.\n";
+	char *s2 = "Hello, I'm '%f' years old.\n";
+	float d = 100;
+	float d2 = -2;
+
+	snprintf(buffer, ARRAY_LENGTH(buffer), s1, d);
 	OutputDebugString(buffer);
-	snprintf(buffer, ARRAY_LENGTH(buffer), "Hello, I'm aaaaaaaaa'%e' years old.\n", 200.0);
+	snprintf(buffer, ARRAY_LENGTH(buffer), s2, d2);
 	OutputDebugString(buffer);
 	OutputDebugString("mine\n");
-	DHSTR_snprintf(buffer, ARRAY_LENGTH(buffer), "Hello, I'm '%e' years old.\n", d);
+	DHSTR_snprintf(buffer, ARRAY_LENGTH(buffer), s1, d);
 	OutputDebugString(buffer);
-	DHSTR_snprintf(buffer, ARRAY_LENGTH(buffer), "Hello, I'm aaaaaa '%e' years old.\n", 200.0);
+	DHSTR_snprintf(buffer, ARRAY_LENGTH(buffer), s2, d2);
 	OutputDebugString(buffer);
 }
 
