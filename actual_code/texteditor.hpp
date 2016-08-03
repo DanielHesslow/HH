@@ -57,15 +57,20 @@ void* __cdecl _alloca(_In_ size_t _Size);
 #include "History.cpp"
 
 internal int getLineFromIterator(TextBuffer *buffer, MGB_Iterator it);
-internal float scaleFromLine(TextBuffer *buffer, int line);
+internal CharRenderingInfo renderingStateFromLine(TextBuffer *buffer, int line);
 internal int getLineStart(BackingBuffer *backingBuffer, int line);
 internal void freeBufferedCharacters();
+internal int getLineLength(TextBuffer *textBuffer, int line);
+
+CharRenderingInfo apply_rendering_changes_at(TextBuffer *textBuffer, Location loc, CharRenderingInfo rendering);
+
 
 internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 {
 	//either us or move caret to X have some sort of problem (all or just high unicode stuff?)
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
-	float scale = scaleFromLine(textBuffer, getLineFromIterator(textBuffer, it));
+	int line = getLineFromIterator(textBuffer, it);
+	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
 	int initial_byte_pos = 0;
 	if (!MoveIterator(mgb, &it, -1));
 	for (;;)
@@ -76,6 +81,7 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 	}
 	if (!MoveIterator(mgb, &it, 1));
 
+	Location loc = {line,0};
 	char32_t codepoint_a, codepoint_b;
 	int ack = getCodepoint(mgb, it, &codepoint_a);
 	MGB_Iterator prev_it = it;
@@ -88,10 +94,12 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 		read = getCodepoint(mgb, it, &codepoint_b);
 		if (!read)break;
 		ack += read;
-		x_ack += getCharacterWidth(textBuffer, prev_it, codepoint_a, codepoint_b, textBuffer->font, scale);
+		rendering = apply_rendering_changes_at(textBuffer, loc, rendering);
+		x_ack += getCharacterWidth(textBuffer, prev_it, codepoint_a, codepoint_b, rendering.font, rendering.scale);
 		MoveIterator(mgb, &it, read);
 		codepoint_a = codepoint_b;
 		prev_it = tmp;
+		++loc.column;
 	}
 	return x_ack;
 }
@@ -142,9 +150,11 @@ internal void gotoStartOfLine(TextBuffer *textBuffer, int line, select_ selectio
 internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selection, int caretIdIndex)
 {
 	// this assumes that we're on the start of the line.
-	
+
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
-	float scale = scaleFromLine(textBuffer, getLineFromCaret(textBuffer, caretId));
+	int line = getLineFromCaret(textBuffer, caretId);
+	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
+	Location loc = { line,0 };
 
 	int x = 0;
 	int dx = 0;
@@ -161,13 +171,15 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 	{
 		MGB_Iterator pit = it;
 		MoveIterator(mgb, &it, b_read_len);
-		dx = getCharacterWidth(textBuffer, prev_it, codepoint_a, codepoint_b, textBuffer->font, scale);
+		rendering = apply_rendering_changes_at(textBuffer, loc, rendering);
+		dx = getCharacterWidth(textBuffer, prev_it, codepoint_a, codepoint_b, rendering.font, rendering.scale);
 		if (abs(x - targetX) < abs((x + dx) - targetX)||isLineBreak(codepoint_a)) break;
 		ack += a_read_len;
 		x += dx;
 		codepoint_a = codepoint_b;
 		a_read_len = b_read_len;
 		prev_it = pit;
+		++loc.column;
 	}
 	for (int i = 0; i < ack;i++)
 		move_nc(textBuffer, dir_right, caretIdIndex, do_log, selection, movemode_byte);
@@ -233,15 +245,146 @@ internal int getNextColor(int *index)
 	return backgroundColors[*index++];
 }
 
-global_variable float scale = -1;
+
+void change_rendering_scale(TextBuffer *textBuffer, Location loc, float new_scale, void *owner)
+{
+	CharRenderingChange change = {};
+	change.scale = new_scale;
+	change.location = loc;
+	change.type = rendering_change_scale;
+	change.owner = owner;
+	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+}
+
+void change_rendering_color(TextBuffer *textBuffer, Location loc, int new_color, void *owner)
+{
+	CharRenderingChange change = {};
+	change.color = new_color;
+	change.location = loc;
+	change.type = rendering_change_color;
+	change.owner = owner;
+	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+}
+
+void change_rendering_background_color(TextBuffer *textBuffer, Location loc, int new_color, void *owner)
+{
+	CharRenderingChange change = {};
+	change.background_color = new_color;
+	change.location = loc;
+	change.type = rendering_change_background_color;
+	change.owner = owner;
+	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+}
+
+void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc, int new_color, void *owner)
+{
+	CharRenderingChange change = {};
+	change.highlight_color= new_color;
+	change.location = loc;
+	change.type = rendering_change_highlight_color;
+	change.owner = owner;
+	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+}
+
+void change_rendering_font(TextBuffer *textBuffer, Location loc, Typeface::Font *new_font, void *owner)
+{
+	CharRenderingChange change = {};
+	change.font = new_font;
+	change.location = loc;
+	change.type = rendering_change_font;
+	change.owner = owner;
+	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+}
+
+CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRenderingChange change)
+{
+	switch (change.type)
+	{
+	case rendering_change_background_color:
+		rendering.background_color = change.background_color;
+		break;
+	case rendering_change_highlight_color:
+		rendering.highlight_color = change.highlight_color;
+		break;
+	case rendering_change_color:
+		rendering.color = change.color;
+		break;
+	case rendering_change_font:
+		rendering.font = change.font;
+		break;
+	case rendering_change_scale:
+		rendering.scale = change.scale;
+		break;
+
+	}
+	return rendering;
+}
+
+CharRenderingInfo apply_rendering_changes_at(TextBuffer *textBuffer, Location loc, CharRenderingInfo rendering)
+{
+	CharRenderingChange ch = {};
+	ch.location = loc;
+	int index;
+	if (binary_search(&textBuffer->rendering_changes, ch, &index))
+	{
+		while (!cmpCharRenderingChange(&textBuffer->rendering_changes.start[index], &textBuffer->rendering_changes.start[index - 1]) && index>0)
+			--index;
+		do {
+			rendering = apply_rendering_change(rendering, textBuffer->rendering_changes.start[index]);
+			++index;
+		} while (!cmpCharRenderingChange(&textBuffer->rendering_changes.start[index], &textBuffer->rendering_changes.start[index - 1]) && index < textBuffer->rendering_changes.length);
+	}
+	return rendering;
+}
+
 internal float scaleFromLine(TextBuffer *textBuffer, int line)
 {
-	if (scale == -1)
-	{
-		scale = stbtt_ScaleForPixelHeight(textBuffer->font->font_info, 14);
-	}
-	return scale;
+	return renderingStateFromLine(textBuffer, line).scale;
 }
+
+internal int lineHeightFromLine(TextBuffer *textBuffer, int line)
+{
+	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
+	int len = getLineLength(textBuffer, line);
+	Location loc = { line,0 };
+	int m = 0;
+	for (int i = 0; i < len; i++) // might be cached if needed. 
+	{
+		rendering = apply_rendering_changes_at(textBuffer, loc, rendering);
+		m = max((rendering.font->lineHeight *rendering.scale),m);
+		++loc.column;
+	}
+	return m;
+}
+internal int descentFromLine(TextBuffer *textBuffer, int line)
+{
+	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
+	int len = getLineLength(textBuffer, line);
+	Location loc = { line,0 };
+	int m = 0;
+	for (int i = 0; i < len; i++) // might be cached if needed. 
+	{
+		rendering = apply_rendering_changes_at(textBuffer, loc, rendering);
+		m = max(-rendering.font->descent * rendering.scale, m);
+		++loc.column;
+	}
+	return -m;
+}
+
+
+internal CharRenderingInfo renderingStateFromLine(TextBuffer *textBuffer, int line)
+{
+	CharRenderingInfo init = textBuffer->initial_rendering_state;
+	for (int i = 0; i < textBuffer->rendering_changes.length; i++) // probably cache things
+	{
+		CharRenderingChange ch = textBuffer->rendering_changes.start[i];
+		if (ch.location.line > line || (ch.location.column > 0 && ch.location.line == line)) break;
+		init = apply_rendering_change(init, ch);
+	}
+	return init; // for now.
+}
+
+
 
 internal float backgroundColorFromLine(TextBuffer *textBuffer, int line)
 {
@@ -1249,56 +1392,6 @@ Typeface::Font LoadFont(DHSTR_String path)
 
 
 
-#define DHEN_PAIR
-#define DHEN_VALUES \
-X(Regular,    hash_string_constexpr("regular"))\
-X(Italic,     hash_string_constexpr("italic")) \
-X(Bold,       hash_string_constexpr("bold")) \
-X(Semi,       hash_string_constexpr("semi")) \
-X(Demi,       hash_string_constexpr("demi")) \
-X(Light,      hash_string_constexpr("light")) \
-X(Condensed,  hash_string_constexpr("condensed")) \
-X(Black,      hash_string_constexpr("black")) \
-
-
-#define DHEN_PREFIX fontqual
-#define DHEN_NAME FontQualifiers
-#include "enums.h"
-#undef DHEN_NAME 
-#undef DHEN_PREFIX 
-#undef DHEN_VALUES
-#undef DHEN_PAIR
-/*
-FontQualifiers getQualifiers(char *name)
-{
-	int ret = 0;
-	int ack;
-	while (*name)
-	{
-		if (name == ' ')
-		{
-			for (int i = 0; i < ARRAY_LENGTH(FontQualifiers_value); i++)
-			{
-				if (fontQualifiers_value[i] == ack)
-				{
-					ret |= 
-				}
-			}
-		}
-
-	}
-	return (FontQualifiers)ret;
-}
-*/
-
-/*
-FontQualifiers contins(char *s)
-{
-	while (*++s)
-	{
-	}
-}
-*/
 Typeface LoadTypeface(int index)
 {//fix me
 	Typeface ret = {};
@@ -1365,30 +1458,7 @@ Typeface LoadTypeface(int index)
 
 	return ret;
 }
-/*
-struct MaybeTypeface
-{
-	bool exist;
-	Typeface typeface;
-};
-DEFINE_DynamicArray(MaybeTypeface);
-MaybeTypeface *loadedTypefaces = (MaybeTypeface *)0;
 
-
-Typeface getTypeface(int index)
-{
-	if (!loadedTypefaces)
-	{
-		loadedTypefaces = (MaybeTypeface *)Allocate(platform_allocator, availableTypefaces.length*sizeof(MaybeTypeface),"loaded typeface");
-	}
-	if (!loadedTypefaces[index].exist)
-	{
-		loadedTypefaces[index].typeface = LoadTypeface(index);
-		loadedTypefaces[index].exist = true;
-	}
-	return loadedTypefaces[index].typeface;
-}
-*/
 
 struct MaybeFont
 {
@@ -1455,7 +1525,12 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	DH_Allocator allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "textBuffer arena"));
 	TextBuffer textBuffer = {};
 	textBuffer.allocator = allocator;
-	textBuffer.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
+	textBuffer.initial_rendering_state.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
+	textBuffer.initial_rendering_state.scale = stbtt_ScaleForPixelHeight(textBuffer.initial_rendering_state.font->font_info, 14);
+	textBuffer.initial_rendering_state.color = foregroundColor;
+	textBuffer.initial_rendering_state.background_color = backgroundColors[0];
+	textBuffer.initial_rendering_state.highlight_color = 0;
+
 	//textBuffer.font = getFont(DHSTR_MAKE_STRING("Segoe UI Symbol"));
 	textBuffer.textBuffer_id = running_textBuffer_id++;
 	textBuffer.bufferType = regularBuffer;
@@ -1465,6 +1540,7 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	textBuffer.cursorInfo = DHDS_constructDA(CursorInfo,20, allocator);
 	textBuffer.contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook,20, allocator);
 	textBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
+	textBuffer.rendering_changes = DHDS_ORD_constructDA(CharRenderingChange, 20, allocator);
 
 	return textBuffer;
 }
@@ -1678,17 +1754,17 @@ internal Bitmap getVerticalBitmapNumber(Bitmap bitmap, int bitmaps, int index)
 
 internal void fillBitmap(TextBuffer *textBuffer, Bitmap bitmap, int lineOffset,int y)
 {
-	Typeface::Font tmp_font_to_make_things_work = *textBuffer->font;
-	if (y > 0)
+	if (y > 0) // paint to the current line 
 	{
-		float scale = scaleFromLine(textBuffer, lineOffset);
-		renderRect(bitmap, 0, 0, bitmap.width, tmp_font_to_make_things_work.lineHeight*scale, backgroundColorFromLine(textBuffer,lineOffset));
+		y = 0;
+		//int h = lineHeightFromLine(textBuffer, lineOffset)-y;
+		//renderRect(bitmap, 0, 0, bitmap.width, h, backgroundColorFromLine(textBuffer, lineOffset));
 	}
 	while (y < bitmap.height && lineOffset<getLines(textBuffer->backingBuffer))
 	{
-		float scale = scaleFromLine(textBuffer, lineOffset);
-		renderRect(bitmap, 0, y, bitmap.width, tmp_font_to_make_things_work.lineHeight*scale, backgroundColorFromLine(textBuffer,lineOffset));
-		y += tmp_font_to_make_things_work.lineHeight * scaleFromLine(textBuffer, lineOffset++);
+		int h = lineHeightFromLine(textBuffer, lineOffset++);
+		renderRect(bitmap, 0, y, bitmap.width, h, backgroundColorFromLine(textBuffer,lineOffset));
+		y += h;
 	}
 	if (y < bitmap.height)
 	{
@@ -1707,6 +1783,10 @@ internal void clearBitmap(Bitmap bitmap, int color)
 #define getGreen(color)((color >> 8) & 0x000000ff)
 #define getBlue(color)(color & 0x000000ff)
 #define createColor(alpha, red,green,blue)(alpha << 24 | red << 16 | green << 8 | blue);
+
+
+// --- SIMD ---
+
 #include "emmintrin.h"
 #include "smmintrin.h" //sse 4 for that one pack32us instruction... maybe instead we just remove it??		
 
@@ -1732,10 +1812,6 @@ internal inline __m128i div255(__m128i x)
 	return x;
 }
 
-
-
-
-// --- SIMD ---
 
 // compared to memset (which can't to 4 byte elements obviously)
 // about to 2x faster at 100 elements on my machene
@@ -1950,7 +2026,6 @@ internal void blitBitmap(Bitmap from, Bitmap to, int xOffset, int yOffset)
 	}
 }
 
-
 internal int ciel_divide(int top, int bottom)
 {
 	return (top + bottom - 1) / bottom;
@@ -1994,7 +2069,7 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale * 3, scale, glyph_index, &width, &height, &xOff, &yOff); //statically allocate a bunch here?
 	float die_off = 1.5; // [1.5,2]
 	float intensity = 1;
-	float subpix_bleed[] = { .5f *die_off * intensity / 3, .5f *intensity / 3 , .5f *intensity / (3 * die_off) };
+	float subpix_bleed[] = { .5f * intensity / 3, .5f *intensity*die_off / 3 , .5f *intensity / (3 * die_off) };
 	
 	int bleed_extra_per_row = ciel_divide((ARRAY_LENGTH(subpix_bleed) - 1) * 2, 3);
 	int color_stride = (ciel_divide(width + 2, 3) + bleed_extra_per_row) + 1;
@@ -2063,16 +2138,6 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 		return loadBitmap(codepoint, scale, font); 
 }
 
-struct CharRenderingInfo
-{
-	int color;
-	int x;
-	int y;
-	float scale;
-	Typeface::Font *typeface;
-};
-
-
 internal void renderCharacter(Bitmap bitmap, char32_t code_point, int x, int y, float scale, int color, Typeface::Font *Font)
 {
 	if (code_point == VK_TAB || isVerticalTab(code_point)) return;
@@ -2086,7 +2151,7 @@ internal void renderCharacter(Bitmap bitmap, char32_t code_point, int x, int y, 
 
 internal void renderCharacter(Bitmap bitmap, char32_t code_point, CharRenderingInfo rendering)
 {
-	renderCharacter(bitmap, code_point, rendering.x, rendering.y, rendering.scale, rendering.color, rendering.typeface);
+	renderCharacter(bitmap, code_point, rendering.x, rendering.y, rendering.scale, rendering.color, rendering.font);
 }
 
 internal void renderCaret(Bitmap bitmap, int x, int y,float scale,Typeface::Font *typeface,int color)
@@ -2117,12 +2182,17 @@ internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int co
 
 internal void renderRect(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color)
 {
+	if (xOffset < 0)
+	{
+		width += xOffset;
+		xOffset = 0;
+	}
 	char *row = (char *)bitmap.memory + yOffset*bitmap.stride +xOffset*bitmap.bytesPerPixel;
 	width = min(width, bitmap.width - min(xOffset,bitmap.width));
 	height = min(height, bitmap.height - min(yOffset, bitmap.height));
 	for (int y = 0; y<height; y++)
 	{
-		if ((y + yOffset)< 0) //move out to speed up.
+		if ((y + yOffset) < 0) //move out to speed up.
 		{
 			row += bitmap.stride;
 		}
@@ -2262,42 +2332,95 @@ internal void bigTitles(TextBuffer *textBuffer, CharRenderingInfo *settings, int
 typedef void(*LineChangeHook)(TextBuffer *textBuffer, CharRenderingInfo *settings, int currentLine);
 
 
-enum CharRenderingChangeType
-{
-	rendering_change_scale,
-	rendering_change_color,
-	rendering_change_font,
-};
 
-
-struct CharRenderingChange
+/*
+* this is the first pass for rendering text
+* it is very similar to the render textFunction 
+* _However_ it needs to be seperate (Don't I fucking go in and optimize them togheter again)
+* Because some fonts may go outside of their line. (or width for that matter but that's solvable)
+* If a font goes below their line those parts will be cut of which is not ok.
+* Doing all of that in one pass is obviously possible but I don't have the time nor the incentive to do that.
+* some code duplication and slow down is ok in the name of decreased complexity.
+*/
+internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret)
 {
-	Location location;
-	void *owner;
-	CharRenderingChangeType type;
-	union
+	MGB_Iterator it = getIteratorAtLine(textBuffer, startLine);
+
+	textBuffer->caretX = -10;
+	int orgX = x;
+	bool ended = false;
+
+	int currentLine = startLine;
+	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, startLine);
+	rendering.x = x;
+	rendering.y = y- lineHeightFromLine(textBuffer, currentLine);
+
+	char32_t last_codepoint = 0;
+	Location current_loc = { startLine,0 };
+	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
+
+	MGB_Iterator prev_it;
+	int lh = lineHeightFromLine(textBuffer, currentLine);
+	
+	int last_rect_x = orgX;
+	
+	if (length(textBuffer->backingBuffer->buffer))
 	{
-		float scale;
-		int color;
-		Typeface::Font *font;
-	};
-};
+		CharRenderingInfo old_rendering = rendering;
+		while (!ended)
+		{
+			char32_t codepoint;
+			MGB_Iterator pit = it;
 
-inline int cmp_int(int a, int b)
-{
-	return (a > b) - (a < b); //+1,-1, 0 are possible return values
+			int read = getCodepoint(mgb, it, &codepoint);
+			ended = !MoveIterator(mgb, &it, read);
+
+			bool lineBreak = isLineBreak(codepoint);
+
+			if (lineBreak)
+			{
+				++current_loc.line;
+				current_loc.column = 0;
+			}
+			else
+				++current_loc.column;
+			{
+				int width = 0;
+				if (last_codepoint != 0) {
+					width = getCharacterWidth(textBuffer, prev_it, last_codepoint, codepoint, old_rendering.font, old_rendering.scale);
+				}
+				
+				rendering.x += width;
+			}
+
+			if (lineBreak)
+			{
+				renderRect(bitmap, 0, rendering.y, ciel_divide(orgX,3), lh, old_rendering.background_color);
+				renderRect(bitmap, ciel_divide(last_rect_x, 3), rendering.y, ciel_divide(rendering.x-last_rect_x, 3), lh, old_rendering.highlight_color ? old_rendering.highlight_color : old_rendering.background_color);
+				int s = ciel_divide(last_rect_x, 3) + ciel_divide(rendering.x - last_rect_x, 3);
+				renderRect(bitmap, s, rendering.y, bitmap.width-s, lh, old_rendering.background_color);
+				last_rect_x = orgX;
+				if (rendering.y > bitmap.height) { break; }
+				rendering.y += lh;
+				lh = lineHeightFromLine(textBuffer, ++currentLine);
+				rendering.x = orgX;
+				codepoint = 0;
+			}
+			else if (old_rendering.highlight_color != rendering.highlight_color)
+			{
+				renderRect(bitmap, ciel_divide(last_rect_x, 3), rendering.y, ciel_divide(rendering.x - last_rect_x, 3), lh, old_rendering.highlight_color ? old_rendering.highlight_color : old_rendering.background_color);
+				last_rect_x = rendering.x;
+			}
+
+			prev_it = pit;
+			last_codepoint = codepoint;
+			old_rendering = rendering;
+			rendering = apply_rendering_changes_at(textBuffer, current_loc, rendering);
+		}
+	}
 }
 
-inline int cmpCharRenderingChange(void *v_a, void *v_b)
-{
-	CharRenderingChange a = *(CharRenderingChange *)v_a;
-	CharRenderingChange b = *(CharRenderingChange *)v_b;
-	return cmp_int(a.location.line, b.location.line) << 1 & cmp_int(a.location.column, b.location.column); //returns 3, 2, 1, 0, -1,-2 -3
-}
-DEFINE_Complete_ORD_DynamicArray(CharRenderingChange, cmpCharRenderingChange);
-
-internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret, 
-	LineChangeHook *lineChangeFuncs=0, int NumberOfLineChangeFuncs=0)
+internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret)
 {
 	MGB_Iterator it = getIteratorAtLine(textBuffer, startLine);
 	
@@ -2306,26 +2429,20 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 	bool ended = false;
 
 	int currentLine = startLine;
-	CharRenderingInfo rendering = {};
+	CharRenderingInfo rendering = renderingStateFromLine(textBuffer,startLine);
 	rendering.x = x;
 	rendering.y = y;
-	rendering.scale = scaleFromLine(textBuffer, currentLine);
-	rendering.color = foregroundColor;
-	rendering.typeface = textBuffer->font;
 
 	char32_t last_codepoint=0;
-
+	Location current_loc = {startLine,0};
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 
 	bool selection = false;
 	MGB_Iterator prev_it;
-
+	int descent = descentFromLine(textBuffer, currentLine);
 	if (length(textBuffer->backingBuffer->buffer))
 	{
-
-		//on the right the caracters render overflow, on the left they're not rendered unless they're completely in.
-		//wrong in other words. Probs with the simd opt?
-
+		CharRenderingInfo old_rendering = rendering;
 		while (!ended)
 		{
 			bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
@@ -2339,28 +2456,36 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			
 			bool lineBreak= isLineBreak(codepoint);
 			
+			if (lineBreak)
+			{
+				++current_loc.line;
+				current_loc.column = 0;
+			}
+			else
+				++current_loc.column;
 			{
 				int width = 0;
 				if (last_codepoint != 0){
-					width = getCharacterWidth(textBuffer,prev_it,last_codepoint, codepoint, rendering.typeface, rendering.scale);
+					width = getCharacterWidth(textBuffer,prev_it,last_codepoint, codepoint, old_rendering.font, old_rendering.scale);
 				}
 				if (selection)
 				{//lol we're effectively done in the next iteration.. :/
-					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.typeface->ascent*rendering.scale, (width + 2) / 3, rendering.typeface->lineHeight*rendering.scale, highlightColor);
+					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.font->ascent*rendering.scale, (width + 2) / 3, old_rendering.font->lineHeight*rendering.scale, highlightColor);
 				}
 				rendering.x += width;
+				rendering.y += descent;
 				if(!lineBreak)
 					renderCharacter(bitmap, codepoint, rendering);
+				rendering.y -= descent;
 			}
 			
 			//oh yea! Think about this for a while... (I'm sorry, but I like it)
 			selection = onSelection ^ onCaret ^ selection;
-
 			
 			if (onCaret)
 			{
 				if (drawCaret)
-					renderCaret(bitmap, rendering.x, rendering.y, rendering.scale, rendering.typeface, onCaret ? caretColor : caretColorDark);
+					renderCaret(bitmap, rendering.x, rendering.y+descent, rendering.scale, rendering.font, onCaret ? caretColor : caretColorDark);
 				textBuffer->caretX = (rendering.x - orgX);
 			}
 
@@ -2369,18 +2494,16 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				if (codepoint == '\r' &&  *getCharacter(mgb, it) == '\n'){ // \r\n is a single lineending.
 					ended |= !MoveIterator(mgb, &it, 1);
 				}
-				++currentLine;
-				for (int i = 0; i < NumberOfLineChangeFuncs; i++)
-				{
-					lineChangeFuncs[i](textBuffer, &rendering, currentLine);
-				}
 				if (rendering.y > bitmap.height) { break; }
-				rendering.y += rendering.typeface->lineHeight*rendering.scale;
+				rendering.y += lineHeightFromLine(textBuffer, ++currentLine);
 				rendering.x = orgX;
 				codepoint = 0;
+				descent = descentFromLine(textBuffer, currentLine);
 			}
 			prev_it = pit;
 			last_codepoint = codepoint;
+			old_rendering = rendering;
+			rendering = apply_rendering_changes_at(textBuffer, current_loc, rendering);
 		}
 		bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
 		bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
@@ -2388,13 +2511,12 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 		{
 			int width = 0;
 			if (last_codepoint != 0) {
-				width = getCharacterWidth(textBuffer, prev_it, last_codepoint, '|', rendering.typeface, rendering.scale);
+				width = getCharacterWidth(textBuffer, prev_it, last_codepoint, '|', rendering.font, rendering.scale);
 			}
 			rendering.x += width;
-			renderCaret(bitmap, rendering.x, rendering.y, rendering.scale, rendering.typeface, onCaret ? caretColor : caretColorDark);
+			renderCaret(bitmap, rendering.x, rendering.y + descent, rendering.scale, rendering.font, onCaret ? caretColor : caretColorDark);
 			textBuffer->caretX = (rendering.x - orgX);
 		}
-
 	}
 }
 
@@ -2453,7 +2575,8 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 internal void renderCommandLine(Bitmap bitmap, Data data)
 {
 	TextBuffer *buffer = data.commandLine;
-	int LH = buffer->font->lineHeight* scaleFromLine(buffer, 0);
+	CharRenderingInfo rendering = renderingStateFromLine(buffer, 0);
+	int LH = rendering.font->lineHeight * rendering.scale;
 	int padding = 2;
 	int minWidth = 400;
 	int width = bitmap.width / 2;
@@ -2464,7 +2587,7 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 	Rect r = { x,y,width,height};
 	renderRect(bitmap,r, backgroundColors[2]);
 
-	int dec = buffer->font->descent* scaleFromLine(buffer, 0);
+	int dec = rendering.font->descent* rendering.scale;
 
 	if (data.menu.length > 0)
 	{
@@ -2482,7 +2605,7 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 			{
 				clearBitmap(b, backgroundColors[2]);
 			}
-			renderText(b,data.menu.start[i].name,scaleFromLine(buffer,0),foregroundColor,0,height-3,buffer->font); // the one here is a bit worrying... 
+			renderText(b,data.menu.start[i].name,scaleFromLine(buffer,0),foregroundColor,0,height-3,rendering.font); // the one here is a bit worrying... 
 		}
 	}
 	renderText(buffer, subBitmap(bitmap, r), 0, 0, height + dec, true);
@@ -2491,13 +2614,12 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 
 internal int calculateVisibleLines(TextBuffer *textBuffer, Bitmap bitmap, int line)
 {
-	Typeface::Font tmp_font_and_stuff = *textBuffer->font;
 	int y = 0;
 	int counter = 0;
 	while (y < bitmap.height)
 	{
 		if (line + counter>getLines(textBuffer->backingBuffer))break;
-		y += tmp_font_and_stuff.lineHeight*scaleFromLine(textBuffer, line + counter);
+		y += lineHeightFromLine(textBuffer, line+counter);
 		++counter;
 	}
 	return counter - 1;
@@ -2514,7 +2636,7 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	float targetY = clamp(textBuffer->lastWindowLineOffset+0.5, line - visibleLines + 1, line);
 	
 	float diff = (targetY - textBuffer->lastWindowLineOffset);
-	float dy = abs(diff) > 0.1 ? diff * 0.2 : diff;
+	float dy = abs(diff) > 0.1 ? diff * 0.1 : diff;
 
 	textBuffer->lastWindowLineOffset = textBuffer->lastWindowLineOffset + dy;
 
@@ -2530,21 +2652,15 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	{
 		targetX = clamp(textBuffer->dx, min, max);
 	}
-
-
 	float diffx = (targetX - textBuffer->dx);
 	int dx = abs(diffx) > 0.1 ? diffx * 0.2 : diffx;
-
 	textBuffer->dx += dx;
-	
-	
 	float firstScale = scaleFromLine(textBuffer, textBuffer->lastWindowLineOffset);
-	
-	//float offset = ((int)textBuffer->lastWindowLineOffset) - textBuffer->lastWindowLineOffset;
-	float offset = 0;
-	fillBitmap(textBuffer, bitmap, textBuffer->lastWindowLineOffset, y - textBuffer->font->descent * firstScale + (textBuffer->font->lineHeight*firstScale)*(offset));
-	LineChangeHook lch[] = { bigTitles };
-	renderText(textBuffer, margin(bitmap,x,x,y,y), textBuffer->lastWindowLineOffset, textBuffer->dx, y + (textBuffer->font->lineHeight*firstScale)*(1+offset), drawCaret, lch, ARRAY_LENGTH(lch));
+	int firstLH = lineHeightFromLine(textBuffer, textBuffer->lastWindowLineOffset);
+	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, textBuffer->lastWindowLineOffset);
+	//fillBitmap(textBuffer, bitmap, textBuffer->lastWindowLineOffset, y - rendering.font->descent * firstScale );
+	renderBackground(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + firstLH + dy, drawCaret);
+	renderText(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + firstLH+dy, drawCaret);
 }
 
 internal void clearBuffer(MultiGapBuffer *buffer)
@@ -2642,11 +2758,19 @@ internal void initTextBuffer(TextBuffer *textBuffer)
 	Add(&textBuffer->ownedCarets_id, caret_i);
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
-
 	_setLocalBindings(textBuffer);
+	change_rendering_color(textBuffer,				{ 10, 0 }, pointerColor, 0);
+	change_rendering_highlight_color(textBuffer,	{ 10, 0 }, backgroundColors[1], 0);
+	change_rendering_scale(textBuffer,				{ 10, 0 }, textBuffer->initial_rendering_state.scale* 5, 0);
+	change_rendering_font(textBuffer,				{ 10, 0 }, getFont(DHSTR_MAKE_STRING("Arial Italic")), 0);
+
+	change_rendering_color(textBuffer,				{ 10, 10 }, foregroundColor, 0);
+	change_rendering_highlight_color(textBuffer,	{ 10, 10 }, 0, 0);
+	change_rendering_scale(textBuffer,				{ 10, 10 }, textBuffer->initial_rendering_state.scale, 0);
+	change_rendering_font(textBuffer,				{ 10, 10 }, getFont(DHSTR_MAKE_STRING("Arial Unicode")), 0);
 }
 
-internal void renderScroll(TextBuffer *textBuffer,Bitmap bitmap)
+internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
 {
 	int height = 4;
 	float progress = (float)getLineFromCaret(textBuffer,textBuffer->ownedCarets_id.start[0])/ ((float)getLines(textBuffer->backingBuffer)-1);
@@ -2673,11 +2797,8 @@ internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int 
 	// bad, these allocations are completely unnessesary.. (and the only two we do every frame)
 	DHSTR_String allocationInfo = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING(string), buffer->fileName);
 	
-	renderText(bitmap, allocationInfo, scale, foregroundColor, x, y, buffer->font);
+	renderText(bitmap, allocationInfo, scale, foregroundColor, x, y, buffer->initial_rendering_state.font);
 	//the filename looks freed to me... :/
-	
-	/*
-	*/
 }
 
 #if 0
@@ -2807,17 +2928,13 @@ internal void renderTree(Bitmap bitmap, void *node, int offX, int offY, Typeface
 
 internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool isActive, bool drawCaret)
 {//@improve me... this api is not ok.
-	if (!buffer->font->font_info)
-	{
-		assert(false && "font was not loaded correctly");
-		return;
-	}
+	
 	if (buffer->bufferType == regularBuffer)
 	{
 		//if(colorIsDirty)
 		//parseForCC(buffer); 
-		float infoScale = stbtt_ScaleForPixelHeight(buffer->font->font_info, 20);
-		int infoSpace = buffer->font->lineHeight*infoScale;
+		float infoScale = stbtt_ScaleForPixelHeight(buffer->initial_rendering_state.font->font_info, 20);
+		int infoSpace = buffer->initial_rendering_state.font->lineHeight*infoScale;
 	
 		int padding = 0;
 
@@ -2916,7 +3033,7 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 			return false;
 		};
 
-		renderTree(bitmap, &buffer->backingBuffer->history.entries.start[0], bitmap.width / 2, 0, buffer->font, nodeInterface, &buffer->backingBuffer->history);
+		renderTree(bitmap, &buffer->backingBuffer->history.entries.start[0], bitmap.width / 2, 0, buffer->initial_rendering_state.font, nodeInterface, &buffer->backingBuffer->history);
 	}
 	else
 	{
@@ -2976,34 +3093,10 @@ internal Rect centered(Bitmap big, Rect rect)
 	return ret;
 }
 
-
 internal void renderBackground(Bitmap bitmap)
 { //some reving here 
 	clearBitmap(bitmap, backgroundColors[0]);
 
-#if 0
-	int w,h;
-	int comp;
-	unsigned char *image = stbi_load("iconBorderless.png", &w, &h, &comp, STBI_rgb_alpha);
-	if (image)
-	{
-		Bitmap from = {};
-		from.bytesPerPixel = 4;
-		from.height= h;
-		from.width= w;
-		from.memory= image;
-		from.stride = w*from.bytesPerPixel;
-		
-		
-		Rect rect = {};
-		rect.height = h;
-		rect.width = w;
-		rect = centered(bitmap, rect);
-
-		blitBitmap(from, bitmap, rect.x, rect.y);
-	}
-	free(image);
-#endif
 }
 
 //support mutliple buffers to the same file.

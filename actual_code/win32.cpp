@@ -457,9 +457,6 @@ WinMain(HINSTANCE instance,
 		LPSTR args,
 		int showCode)
 {
-
-	test_the_printf();
-	
 	if (GetCaretBlinkTime() == INFINITE)			
 	{
 		blinkTimePerS = 0;

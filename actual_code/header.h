@@ -299,8 +299,59 @@ struct ContextCharWidthHook
 };
 
 
+enum CharRenderingChangeType
+{
+	rendering_change_scale,
+	rendering_change_color,
+	rendering_change_background_color,
+	rendering_change_highlight_color,
+	rendering_change_font,
+};
+
+struct CharRenderingChange
+{
+	Location location;
+	void *owner;
+	CharRenderingChangeType type;
+	union
+	{
+		float scale;
+		int color;
+		int background_color;
+		int highlight_color;
+		Typeface::Font *font;
+	};
+};
+inline int cmp_int(int a, int b)
+{
+	return (a > b) - (a < b); //+1,-1, 0 are possible return values
+}
+
+inline int cmpCharRenderingChange(void *v_a, void *v_b)
+{
+	CharRenderingChange a = *(CharRenderingChange *)v_a;
+	CharRenderingChange b = *(CharRenderingChange *)v_b;
+	return cmp_int(a.location.line, b.location.line) << 1 | cmp_int(a.location.column, b.location.column);
+}
+DEFINE_Complete_ORD_DynamicArray(CharRenderingChange, cmpCharRenderingChange);
+
+
+
 
 DEFINE_DynamicArray(ContextCharWidthHook);
+
+
+struct CharRenderingInfo
+{
+	int color;
+	int background_color;
+	int highlight_color;
+	int x;
+	int y;
+	float scale;
+	Typeface::Font *font;
+};
+
 
 struct TextBuffer
 {
@@ -311,22 +362,26 @@ struct TextBuffer
 
 	int lines;
 	int caretX;
-	Typeface::Font *font;
 
 	DHSTR_String fileName;
-		
+
 	DynamicArray_int ownedCarets_id;
 	DynamicArray_int ownedSelection_id;
 	DynamicArray_CursorInfo cursorInfo;
 	DynamicArray_ContextCharWidthHook contextCharWidthHook;
 	HashTable_BindingIdentifier_PVOID bindingMemory;
+	ORD_DynamicArray_CharRenderingChange rendering_changes;
 	DH_Allocator allocator;
+	CharRenderingInfo initial_rendering_state;
+	int textBuffer_id;
 	//reg_buffer specific renderthings. need to be here becuase no matter the view we're in we need to keep our info consitant
 	//(if we will ever tab back to the old view). If I'm switching to ast view and back I don't want the position to change!
+
+	// I mean, sure but we could keep it somewhere else in either case. like in the binding_memory for example.
+	// that just means that we're not allowed to union the shit together...
 	float lastWindowLineOffset;
 	int dx;
 	uint64_t lastAction;
-	int textBuffer_id;
 };
 
 bool ownsCaret(TextBuffer *buffer, int index)
