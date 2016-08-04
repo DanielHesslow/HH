@@ -2693,14 +2693,12 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 {
 	int visibleLines = calculateVisibleLines(textBuffer, bitmap, textBuffer->lastWindowLineOffset);
 	int line = getLineFromCaret(textBuffer, textBuffer->ownedCarets_id.start[0]);
-	float targetY = clamp(textBuffer->lastWindowLineOffset+0.5, line - visibleLines + 1, line);
+	float targetY = clamp(round(textBuffer->lastWindowLineOffset), line - visibleLines+1, line);
 	
 	float diff = (targetY - textBuffer->lastWindowLineOffset);
-	float dy = abs(diff) > 0.1 ? diff * 0.1 : diff;
-
-	textBuffer->lastWindowLineOffset = textBuffer->lastWindowLineOffset + dy;
-
-	int min = -textBuffer->caretX +40;
+	float dy = abs(diff) > 0.05 ? diff * 0.05 : diff;
+	
+	int min = -textBuffer->caretX + 40;
 	int max = bitmap.width*3-textBuffer->caretX-x-x-40;  //magic, caret width....
 	int targetX;
 
@@ -2719,8 +2717,13 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	int firstLH = lineHeightFromLine(textBuffer, textBuffer->lastWindowLineOffset);
 	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, textBuffer->lastWindowLineOffset);
 	//fillBitmap(textBuffer, bitmap, textBuffer->lastWindowLineOffset, y - rendering.font->descent * firstScale );
-	renderBackground(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + firstLH + dy, drawCaret);
-	renderText(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + firstLH+dy, drawCaret);
+	
+
+	textBuffer->lastWindowLineOffset = textBuffer->lastWindowLineOffset + dy;
+	float ddy = fmod(textBuffer->lastWindowLineOffset,1);
+	
+	renderBackground(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1 - ddy)*	firstLH, drawCaret);
+	renderText(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1-ddy)*	firstLH, drawCaret);
 }
 
 internal void clearBuffer(MultiGapBuffer *buffer)
@@ -2819,7 +2822,7 @@ internal void initTextBuffer(TextBuffer *textBuffer)
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
 	_setLocalBindings(textBuffer);
-	change_rendering_color(textBuffer,              { 10, 0 }, { 1,.5f,.5f,.8f }, 0);
+	change_rendering_color(textBuffer,              { 10, 0 }, { 1,.8f,.5f,.8f }, 0);
 	change_rendering_highlight_color(textBuffer,	{ 10, 0 }, { 1,.5f,.5f,.8f }, 0);
 	change_rendering_scale(textBuffer,				{ 10, 0 }, textBuffer->initial_rendering_state.scale* 5, 0);
 	change_rendering_font(textBuffer,				{ 10, 0 }, getFont(DHSTR_MAKE_STRING("Arial Italic")), 0);
