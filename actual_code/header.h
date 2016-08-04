@@ -308,6 +308,80 @@ enum CharRenderingChangeType
 	rendering_change_font,
 };
 
+struct Color
+{
+	float a, r, g, b;
+	Color operator * (float f)
+	{
+		return{ r*f, g*f, b*f, a*f};
+	}
+	Color operator / (float f)
+	{
+		return{ r/f, g/f, b/f, a/f };
+	}
+	Color operator + (Color c)
+	{
+		return{ r + c.r, g + c.g, b + c.b, a + c.a};
+	}
+	
+	bool operator == (Color c)
+	{
+		return r == c.r && g == c.g && b == c.b && a == c.a;
+	}
+	explicit operator int()
+	{
+		return (((uint8_t)(a * 256)) << 24)|
+			   (((uint8_t)(r * 256)) << 16)|
+		       (((uint8_t)(g * 256)) << 8) |
+			   (((uint8_t)(b * 256)) << 0);
+	}
+};
+
+
+Color rgb(float red, float green, float blue)
+{
+	return{ 1.0f,red,green,blue };
+}
+
+float _hue_to_rgb(float p, float q, float t)
+{
+	if (t < 0.0) t += 1;
+	if (t > 1.0) t -= 1;
+	if (t < (1.0 / 6.0)) 
+		return p + (q - p) * 6.0 * t;
+	if (t < (1.0 / 2.0)) 
+		return q;
+	if (t < (2.0 / 3.0)) 
+		return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+	return p;
+}
+Color hsl(float h, float s, float l) {
+	float r, g, b;
+	h = fmod(h,1);
+	h = h > 0 ? h : 1 - h;
+	s = clamp(s, 0, 1);
+	l = clamp(l, 0, 1);
+
+	if (s == 0) {
+		r = g = b = l; // achromatic
+	}
+	else {
+		float q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+		float p = 2 * l - q;
+		r = _hue_to_rgb(p, q, h + 1.0 / 3.0);
+		g = _hue_to_rgb(p, q, h);
+		b = _hue_to_rgb(p, q, h - 1.0 / 3.0);
+	}
+
+	return{1.0f, r,g,b,};
+}
+
+
+
+
+
+
+
 struct CharRenderingChange
 {
 	Location location;
@@ -316,12 +390,20 @@ struct CharRenderingChange
 	union
 	{
 		float scale;
-		int color;
-		int background_color;
-		int highlight_color;
+		Color color;
 		Typeface::Font *font;
-	};
+	} raw;
+
+	union
+	{
+		float scale;
+		int color;
+		Typeface::Font *font;
+	} applied;
+
+	bool start;
 };
+
 inline int cmp_int(int a, int b)
 {
 	return (a > b) - (a < b); //+1,-1, 0 are possible return values

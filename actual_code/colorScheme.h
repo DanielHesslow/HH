@@ -1,49 +1,32 @@
-#if(!defined ColorScheme)
-#define ColorScheme
-#if 1
-//dark scheme
-uint32 backgroundColors[] = { 0x00272738, 0x00233323, 0x00251919 };
 
-//int background = 0xff262721; (sublime color isch)
-int highlightColor = 0x00333333;
-//int caretColor = 0xff999933;
-//int caretColorBright = 0xff999933;
-int caretColorDark  = 0xffcccc66;
 
-int foregroundColor = 0xffaaaaaa;
+struct ColorScheme
+{
+	Color *background_colors;
+	int number_of_background_colors;
+	Color highlightColor, foregroundColor, caretLight, caretDark, active_color;
+};
 
-int keywordColor = 0xff7777ff;
-int commentColor = 0xff77aa77;
-int pointerColor = 0xffdddd77; //same as multiply ... :(
 
-int arrowColor   = pointerColor;
-int funcColor    = 0xffcc4444;
-int typeColor    = keywordColor;//0xff666666;
-int literalColor = 0xffaaaa00;
-int structColor = 0xff33cc99;
-int activeColor = 0xff559933;
+Color _highlightColor = rgb(.25,.25,.25);
+Color _foregroundColor = rgb(.8f,.8f,.8f);
 
-int caretColor     = 0xff00ffff;
-#else
-//light theme
-uint32 backgroundColors[] = { 0x00f5f5f5, 0x00ffffff, 0x00fafafa };
+Color _caret_light = rgb(.2f,.3f,.8f);
+Color _caret_dark = rgb(.2f,.3f,.8f );
+Color _active_color = hsl(.09,.9f,.5);
 
-int caretColorDark = 0xffcccc66;
+float _s = .4;
+float _i = .1;
+Color _backgroundColors[] = { hsl(1.0 / 2.0,_s,_i), hsl(1.0/3.0,_s,_i), hsl(4.0 / 5.0,_s,_i) };
 
-int literalColor = 0xffaaaa00;
-int structColor = 0xff33cc99;
-int activeColor = 0xffffbb66;
+global_variable ColorScheme active_colorScheme = 
+{
+	_backgroundColors,
+	3,
+	_highlightColor,
+	_foregroundColor,
+	_caret_light,
+	_caret_dark,
+	_active_color
+};
 
-int highlightColor = 0x00111111;
-int caretColor     = 0xff666600;
-
-int foregroundColor = 0xff000000;
-int keyWordColor = 0xff000044;
-int commentColor = 0xff004400;
-int pointerColor = 0xffd555500;
-int arrowColor   = pointerColor;
-int funcColor    = 0xffcc1111;
-int typeColor    = keyWordColor;
-
-#endif
-#endif 

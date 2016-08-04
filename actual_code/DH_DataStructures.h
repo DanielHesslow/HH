@@ -97,10 +97,11 @@ void Remove(DynamicArray_##type *tree, int index)								\
 	assert(tree->length > index);												\
 	tree->start[index] = tree->start[--tree->length];								\
 }																				\
-void Insert(DynamicArray_##type *tree, type element,int index)					\
+type *Insert(DynamicArray_##type *tree, type element,int index)					\
 {																				\
 	_insert_space((DynamicArray_void *)tree, index, sizeof(type));				\
 	tree->start[index]=element;													\
+	return &tree->start[index];													\
 }																				\
 																				\
 void RemoveOrd(DynamicArray_##type *tree, int index)								\
@@ -227,7 +228,7 @@ bool linear_search(ORD_DynamicArray_##type *tree, type elem, int *_out_index)\
 {\
 	return linear_search((void *)tree->start,(size_t)tree->length,sizeof(type),&elem,comparator,_out_index);\
 }\
-void Insert(ORD_DynamicArray_##type *tree, type elem, ordered_insert_placement placement)\
+type *Insert(ORD_DynamicArray_##type *tree, type elem, ordered_insert_placement placement)\
 {\
 	int index;\
 	binary_search(tree, elem, &index);\
@@ -249,7 +250,7 @@ void Insert(ORD_DynamicArray_##type *tree, type elem, ordered_insert_placement p
 			++index;\
 		}\
 	}\
-	Insert((DynamicArray_##type *)tree, elem, index);\
+	return Insert((DynamicArray_##type *)tree, elem, index);\
 }\
 void Remove(ORD_DynamicArray_##type *tree, int index)\
 {\

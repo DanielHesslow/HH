@@ -7,6 +7,7 @@
 #include "..\libs\utf8rewind-1.5.0\unicodedatabase.c"
 
 #include "strings.c"
+#include "maths.c"
 
 
 #include <stdint.h>
@@ -241,79 +242,158 @@ internal void removeSelection(TextBuffer *textBuffer)
 internal int getNextColor(int *index)
 {
 	++*index;
-	*index %= 3;
-	return backgroundColors[*index++];
+	*index %= active_colorScheme.number_of_background_colors;
+	return (int)active_colorScheme.background_colors[*index++];
 }
 
+
+unsigned int blend_colors(unsigned int color_a, unsigned int color_b)
+{
+	int res = 0;
+	res |= (((color_a >> 24) & 0xff) + ((color_a >> 24) & 0xff)) << 23;
+	res |= (((color_a >> 16) & 0xff) + ((color_a >> 16) & 0xff)) << 15;
+	res |= (((color_a >> 8) & 0xff) + ((color_a >> 8) & 0xff)) << 7;
+	res |= (((color_a) & 0xff) + ((color_a) & 0xff)) >> 1;
+	return res;
+}
+
+// 0 is before, a,b colors.
+// (0)|color a (0a)| color b (0ab)| end color a (0b)| end color b (0)|
+// (0)|color a (0a)| color b (0ab)| end color b (0a)| end color a (0)|
+
+
+bool mem_insert(char *block_start, size_t block_length, int insert_length, int insert_index)
+{
+
+	if (insert_index < 0 ||  insert_index >= block_length) return false; // byte_index outsisde of block
+
+	if (insert_length > 0) // insert bytes
+	{
+		if ((block_length - insert_length - insert_index) < 0) return false; // not enough space to insert / remove bytes
+		memmove(&block_start[insert_index + insert_length], &block_start[insert_index], block_length - insert_length - insert_index);
+	}
+	else if (insert_length < 0) // remove bytes
+	{
+		insert_length =-insert_length;
+		if ((block_length - insert_length - insert_index) < 0) return false; // not enough space to insert / remove bytes
+		memmove(&block_start[insert_index], &block_start[insert_index + insert_length], block_length - insert_length - insert_index);
+	}
+	return true;
+}
+
+
+void apply_colors(ORD_DynamicArray_CharRenderingChange *changes)
+{
+	Color colors[200]; // todo alloc if bigger  (not just fail)
+	int c_length=0;
+	for (int i = 0; i < changes->length; i++)
+	{
+		if (changes->start[i].type == rendering_change_highlight_color)
+		{
+			if (changes->start[i].start)
+			{
+				assert(c_length < 198);
+				colors[c_length++] = changes->start[i].raw.color;
+			}
+			else
+			{
+				for (int j = c_length - 1; j >= 0; j--)
+				{
+					if (colors[j] == changes->start[i].raw.color)
+					{
+						colors[j] == colors[--c_length];
+						break;
+					}
+				}
+			}
+
+			Color ack = {0,0,0,0};
+			for (int j = 0; j < c_length; j++)
+			{
+				ack = ack + colors[j];
+			}
+			ack = ack / c_length;
+			int ack_i = (int)colors[c_length - 1];
+			changes->start[i].applied.color = (int)colors[c_length-1];
+		}
+	}
+}
 
 void change_rendering_scale(TextBuffer *textBuffer, Location loc, float new_scale, void *owner)
 {
 	CharRenderingChange change = {};
-	change.scale = new_scale;
+	change.raw.scale = new_scale;
+	change.applied.scale= new_scale;
 	change.location = loc;
 	change.type = rendering_change_scale;
 	change.owner = owner;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
 }
 
-void change_rendering_color(TextBuffer *textBuffer, Location loc, int new_color, void *owner)
+void change_rendering_color(TextBuffer *textBuffer, Location loc, Color new_color, void *owner)
 {
 	CharRenderingChange change = {};
-	change.color = new_color;
+	change.raw.color= new_color;
+	change.applied.color = (int)new_color;
 	change.location = loc;
 	change.type = rendering_change_color;
 	change.owner = owner;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
 }
 
-void change_rendering_background_color(TextBuffer *textBuffer, Location loc, int new_color, void *owner)
+void change_rendering_background_color(TextBuffer *textBuffer, Location loc, Color new_color, void *owner)
 {
 	CharRenderingChange change = {};
-	change.background_color = new_color;
+	change.raw.color = new_color;
+	change.applied.color =(int)new_color;
 	change.location = loc;
 	change.type = rendering_change_background_color;
 	change.owner = owner;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
 }
 
-void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc, int new_color, void *owner)
+void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc, Color new_color, void *owner)
 {
 	CharRenderingChange change = {};
-	change.highlight_color= new_color;
+	change.raw.color= new_color;
 	change.location = loc;
 	change.type = rendering_change_highlight_color;
 	change.owner = owner;
+	change.start = true;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+	apply_colors(&textBuffer->rendering_changes);
 }
 
 void change_rendering_font(TextBuffer *textBuffer, Location loc, Typeface::Font *new_font, void *owner)
 {
 	CharRenderingChange change = {};
-	change.font = new_font;
+	change.raw.font = new_font;
+	change.applied.font = new_font;
 	change.location = loc;
 	change.type = rendering_change_font;
 	change.owner = owner;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
 }
 
+
 CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRenderingChange change)
 {
 	switch (change.type)
 	{
 	case rendering_change_background_color:
-		rendering.background_color = change.background_color;
+		rendering.background_color = change.applied.color;
 		break;
 	case rendering_change_highlight_color:
-		rendering.highlight_color = change.highlight_color;
+		rendering.highlight_color = change.applied.color;
 		break;
 	case rendering_change_color:
-		rendering.color = change.color;
+		rendering.color = change.applied.color;
 		break;
 	case rendering_change_font:
-		rendering.font = change.font;
+		rendering.font = change.applied.font;
 		break;
 	case rendering_change_scale:
-		rendering.scale = change.scale;
+		rendering.scale = change.applied.scale;
 		break;
 
 	}
@@ -365,31 +445,43 @@ internal int descentFromLine(TextBuffer *textBuffer, int line)
 	for (int i = 0; i < len; i++) // might be cached if needed. 
 	{
 		rendering = apply_rendering_changes_at(textBuffer, loc, rendering);
-		m = max(-rendering.font->descent * rendering.scale, m);
+		m = min(rendering.font->descent * rendering.scale, m);  
 		++loc.column;
 	}
-	return -m;
+	return m; // again 
 }
 
 
 internal CharRenderingInfo renderingStateFromLine(TextBuffer *textBuffer, int line)
-{
-	CharRenderingInfo init = textBuffer->initial_rendering_state;
+{ // todo cache results
+	CharRenderingInfo state = textBuffer->initial_rendering_state;
 	for (int i = 0; i < textBuffer->rendering_changes.length; i++) // probably cache things
 	{
 		CharRenderingChange ch = textBuffer->rendering_changes.start[i];
 		if (ch.location.line > line || (ch.location.column > 0 && ch.location.line == line)) break;
-		init = apply_rendering_change(init, ch);
+		state = apply_rendering_change(state, ch);
 	}
-	return init; // for now.
+	return state; 
+}
+
+internal CharRenderingInfo renderingStateFromLocation(TextBuffer *textBuffer, Location loc)
+{ // todo build on top of above (when cachced)
+	CharRenderingInfo state = textBuffer->initial_rendering_state;
+	for (int i = 0; i < textBuffer->rendering_changes.length; i++) // probably cache things
+	{
+		CharRenderingChange ch = textBuffer->rendering_changes.start[i];
+		if (ch.location.line > loc.line || (ch.location.column > loc.column && ch.location.line == loc.line)) break;
+		state = apply_rendering_change(state, ch);
+	}
+	return state;
 }
 
 
-
-internal float backgroundColorFromLine(TextBuffer *textBuffer, int line)
+internal int backgroundColorFromLine(TextBuffer *textBuffer, int line)
 {
-	return backgroundColors[line%ARRAY_LENGTH(backgroundColors)];
+	return (int)active_colorScheme.background_colors[line%active_colorScheme.number_of_background_colors];
 }
+
 internal void redoLineSumTree(BackingBuffer *backingBuffer)
 {
 	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
@@ -578,10 +670,6 @@ internal bool isFuncDelimiter(char i)
 	return isWordDelimiter(i);
 }
 
-
-
-
-
 internal bool validSelection(TextBuffer *buffer)
 {
 	for (int i = 0; i < buffer->ownedSelection_id.length; i++)
@@ -609,7 +697,6 @@ internal void checkIdsExist(TextBuffer *textBuffer)
 	}
 #endif
 }
-
 
 void removeOwnedEmptyCarets(TextBuffer *textBuffer)
 {
@@ -977,30 +1064,6 @@ internal void removeWhile(TextBuffer *textBuffer, bool log, Direction dir, bool(
 	}
 	removeOwnedEmptyCarets(textBuffer);
 }
-internal void clamp(int *i, int low, int high)
-{
-	if (*i < low)
-	{
-		*i = low;
-	}
-	else if (*i > high)
-	{
-		*i = high;
-	}
-}
-internal int clamp(int i, int low, int high)
-{
-	if (i < low)
-	{
-		return low;
-	}
-	if (i > high)
-	{
-		return high;
-	}
-	return i;
-}
-
 
 
 internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex, bool up)
@@ -1527,8 +1590,8 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	textBuffer.allocator = allocator;
 	textBuffer.initial_rendering_state.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
 	textBuffer.initial_rendering_state.scale = stbtt_ScaleForPixelHeight(textBuffer.initial_rendering_state.font->font_info, 14);
-	textBuffer.initial_rendering_state.color = foregroundColor;
-	textBuffer.initial_rendering_state.background_color = backgroundColors[0];
+	textBuffer.initial_rendering_state.color = (int)active_colorScheme.foregroundColor;
+	textBuffer.initial_rendering_state.background_color = (int)active_colorScheme.background_colors[0];
 	textBuffer.initial_rendering_state.highlight_color = 0;
 
 	//textBuffer.font = getFont(DHSTR_MAKE_STRING("Segoe UI Symbol"));
@@ -1614,9 +1677,6 @@ internal TextBuffer openCommanLine()
 	textBuffer.backingBuffer = allocBackingBuffer(200, 200);
 
 	initTextBuffer(&textBuffer);
-	ColorChange cc = {};
-	cc.color = foregroundColor;
-	cc.index = 0;
 	return textBuffer;
 }
 
@@ -2470,7 +2530,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				}
 				if (selection)
 				{//lol we're effectively done in the next iteration.. :/
-					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.font->ascent*rendering.scale, (width + 2) / 3, old_rendering.font->lineHeight*rendering.scale, highlightColor);
+					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.font->ascent*rendering.scale, (width + 2) / 3, old_rendering.font->lineHeight*rendering.scale, (int)active_colorScheme.highlightColor);
 				}
 				rendering.x += width;
 				rendering.y += descent;
@@ -2485,7 +2545,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			if (onCaret)
 			{
 				if (drawCaret)
-					renderCaret(bitmap, rendering.x, rendering.y+descent, rendering.scale, rendering.font, onCaret ? caretColor : caretColorDark);
+					renderCaret(bitmap, rendering.x, rendering.y+descent, rendering.scale, rendering.font,(int) (onCaret ? active_colorScheme.caretLight : active_colorScheme.caretDark));
 				textBuffer->caretX = (rendering.x - orgX);
 			}
 
@@ -2514,7 +2574,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				width = getCharacterWidth(textBuffer, prev_it, last_codepoint, '|', rendering.font, rendering.scale);
 			}
 			rendering.x += width;
-			renderCaret(bitmap, rendering.x, rendering.y + descent, rendering.scale, rendering.font, onCaret ? caretColor : caretColorDark);
+			renderCaret(bitmap, rendering.x, rendering.y + descent, rendering.scale, rendering.font, (int) (onCaret ? active_colorScheme.caretLight : active_colorScheme.caretDark));
 			textBuffer->caretX = (rendering.x - orgX);
 		}
 	}
@@ -2585,7 +2645,7 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 	int x = (bitmap.width - width) /2;
 	int y = 0+padding;
 	Rect r = { x,y,width,height};
-	renderRect(bitmap,r, backgroundColors[2]);
+	renderRect(bitmap,r, (int)active_colorScheme.background_colors[2]);
 
 	int dec = rendering.font->descent* rendering.scale;
 
@@ -2599,13 +2659,13 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 			//crash??
 			if (data.activeMenuItem-1== i)
 			{
-				clearBitmap(b, activeColor);
+				clearBitmap(b, (int) active_colorScheme.active_color);
 			}
 			else
 			{
-				clearBitmap(b, backgroundColors[2]);
+				clearBitmap(b, (int)active_colorScheme.background_colors[2]);
 			}
-			renderText(b,data.menu.start[i].name,scaleFromLine(buffer,0),foregroundColor,0,height-3,rendering.font); // the one here is a bit worrying... 
+			renderText(b,data.menu.start[i].name,scaleFromLine(buffer,0), (int)active_colorScheme.foregroundColor,0,height-3,rendering.font); // the one here is a bit worrying... 
 		}
 	}
 	renderText(buffer, subBitmap(bitmap, r), 0, 0, height + dec, true);
@@ -2759,15 +2819,16 @@ internal void initTextBuffer(TextBuffer *textBuffer)
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
 	_setLocalBindings(textBuffer);
-	change_rendering_color(textBuffer,				{ 10, 0 }, pointerColor, 0);
-	change_rendering_highlight_color(textBuffer,	{ 10, 0 }, backgroundColors[1], 0);
+	change_rendering_color(textBuffer,              { 10, 0 }, { 1,.5f,.5f,.8f }, 0);
+	change_rendering_highlight_color(textBuffer,	{ 10, 0 }, { 1,.5f,.5f,.8f }, 0);
 	change_rendering_scale(textBuffer,				{ 10, 0 }, textBuffer->initial_rendering_state.scale* 5, 0);
 	change_rendering_font(textBuffer,				{ 10, 0 }, getFont(DHSTR_MAKE_STRING("Arial Italic")), 0);
 
-	change_rendering_color(textBuffer,				{ 10, 10 }, foregroundColor, 0);
-	change_rendering_highlight_color(textBuffer,	{ 10, 10 }, 0, 0);
+	change_rendering_color(textBuffer,				{ 10, 10 }, { 1,.5f,.8f,.8f }, 0);
+	change_rendering_highlight_color(textBuffer, { 10, 10 }, {0,0,0,0}, 0);
 	change_rendering_scale(textBuffer,				{ 10, 10 }, textBuffer->initial_rendering_state.scale, 0);
 	change_rendering_font(textBuffer,				{ 10, 10 }, getFont(DHSTR_MAKE_STRING("Arial Unicode")), 0);
+	
 }
 
 internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
@@ -2776,7 +2837,7 @@ internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
 	float progress = (float)getLineFromCaret(textBuffer,textBuffer->ownedCarets_id.start[0])/ ((float)getLines(textBuffer->backingBuffer)-1);
 	int h = (progress * (bitmap.height-height));
 
-	renderRect(bitmap, bitmap.width - 10, h, 10, height, foregroundColor);
+	renderRect(bitmap, bitmap.width - 10, h, 10, height, (int)active_colorScheme.foregroundColor );
 }
 
 bool colorIsDirty=true;
@@ -2785,9 +2846,9 @@ bool colorIsDirty=true;
 internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int x, int y,bool isActive)
 {
 	if(isActive)
-		renderRect(bitmap, 0, 0, bitmap.width, bitmap.height, activeColor);
+		renderRect(bitmap, 0, 0, bitmap.width, bitmap.height, (int)active_colorScheme.active_color);
 	else
-		renderRect(bitmap, 0, 0, bitmap.width, bitmap.height, backgroundColors[0]);
+		renderRect(bitmap, 0, 0, bitmap.width, bitmap.height, (int)active_colorScheme.background_colors[2]);
 
 	char string[400];
 	//int pos = getLeftCaretIndex(&buffer->backingBuffer->buffer);
@@ -2797,7 +2858,7 @@ internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int 
 	// bad, these allocations are completely unnessesary.. (and the only two we do every frame)
 	DHSTR_String allocationInfo = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING(string), buffer->fileName);
 	
-	renderText(bitmap, allocationInfo, scale, foregroundColor, x, y, buffer->initial_rendering_state.font);
+	renderText(bitmap, allocationInfo, scale, (int)active_colorScheme.foregroundColor, x, y, buffer->initial_rendering_state.font);
 	//the filename looks freed to me... :/
 }
 
@@ -2900,13 +2961,13 @@ internal void renderNodeCentered(Bitmap bitmap, void *node, int offX, int offY, 
 	int width = getRenderedWidthNode(node)-1;
 	int height = getRenderedHeightNode(node)-1;
 	Bitmap b = subBitmap(bitmap,width,height,offX-width/2,offY);
-	b = drawBorder(b, 1, 1, 1, 1, activeColor);
+	b = drawBorder(b, 1, 1, 1, 1, (int)active_colorScheme.active_color);
 	
 	const int buffer_len = 40;
 	char buffer[buffer_len];
-	renderText(b, nodeInterface.getName(data, node, buffer, buffer_len), 0.012, foregroundColor, 2, 15, font );
+	renderText(b, nodeInterface.getName(data, node, buffer, buffer_len), 0.012, (int)active_colorScheme.foregroundColor, 2, 15, font );
 
-	renderText(b, nodeInterface.getText(data, node, buffer, buffer_len), 0.008, foregroundColor, 2, 30, font);
+	renderText(b, nodeInterface.getText(data, node, buffer, buffer_len), 0.008, (int)active_colorScheme.foregroundColor, 2, 30, font);
 }
 
 internal void renderTree(Bitmap bitmap, void *node, int offX, int offY, Typeface::Font *typeface, NodeInterface nodeInterface, void *data_passed_to_interface_funcs)
@@ -2965,7 +3026,7 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 	else if (buffer->bufferType == HistoryBuffer)
 	{
 		NodeInterface nodeInterface;
-		clearBitmap(bitmap, backgroundColors[1]);
+		clearBitmap(bitmap, (int)active_colorScheme.background_colors[1]);
 
 		//@cpp heavy... 
 		nodeInterface.getText = [](void *phistory, void *node, char* buffer, size_t buffer_len) {
@@ -3095,7 +3156,7 @@ internal Rect centered(Bitmap big, Rect rect)
 
 internal void renderBackground(Bitmap bitmap)
 { //some reving here 
-	clearBitmap(bitmap, backgroundColors[0]);
+	clearBitmap(bitmap, (int)active_colorScheme.background_colors[0]);
 
 }
 
@@ -3230,7 +3291,7 @@ internal Bitmap layout(Bitmap bitmap,int length, int index)
 		leftPadding = 0;
 	if(index == length-1)
 		rightPadding= 0;
-	subBitmap = drawBorder(subBitmap, leftPadding, rightPadding, 0, 0, activeColor);
+	subBitmap = drawBorder(subBitmap, leftPadding, rightPadding, 0, 0, (int)active_colorScheme.active_color);
 
 	return subBitmap;
 }
