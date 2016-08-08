@@ -262,6 +262,15 @@ void _moveUp(TextBuffer *textBuffer, Mods mods)
 	checkIdsExist(textBuffer);
 }
 
+void _moveUpPage(TextBuffer *textBuffer, Mods mods)
+{
+	movePage(textBuffer, true);
+}
+void _moveDownPage(TextBuffer *textBuffer, Mods mods)
+{
+	movePage(textBuffer, false);
+}
+
 void _moveDown(TextBuffer *textBuffer, Mods mods)
 {
 	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
@@ -906,6 +915,8 @@ internal void setBindingsLocal(TextBuffer *textBuffer)
 		bindKey(VK_UP, precisely, mod_control, insertCaretAbove);
 		bindKey( VK_DOWN, precisely, mod_control, insertCaretBelow);
 		bindKey('C', precisely, mod_alt, _cloneBuffer);
+		bindKey(VK_PRIOR, precisely, mod_none, _moveUpPage);
+		bindKey(VK_NEXT, precisely, mod_none, _moveDownPage);
 		bindKey( VK_ESCAPE, precisely, mod_none, removeAllButOneCaret);
 		bindKey('\t', precisely, mod_control, appendVerticalTab);
 	} 

@@ -218,7 +218,8 @@ unsigned int silly_bind_ident_hash(BindingIdentifier ident) {
 unsigned int silly_hash_void_ptr(void *ptr) {
 	return silly_hash((int)(long long)(ptr));
 }
-unsigned int ptr_eq(void *a, void *b) {
+
+bool ptr_eq(void *a, void *b) {
 	return a == b;
 }
 
@@ -313,17 +314,21 @@ struct Color
 	float a, r, g, b;
 	Color operator * (float f)
 	{
-		return{ r*f, g*f, b*f, a*f};
+		return{ a*f, r*f, g*f, b*f};
 	}
 	Color operator / (float f)
 	{
-		return{ r/f, g/f, b/f, a/f };
+		return{ a / f ,r/f, g/f, b/f, };
 	}
 	Color operator + (Color c)
 	{
-		return{ r + c.r, g + c.g, b + c.b, a + c.a};
+		return{a + c.a, r + c.r, g + c.g, b + c.b};
 	}
-	
+	Color operator * (Color c)
+	{
+		return{ a * c.a, r * c.r, g * c.g, b * c.b };
+	}
+
 	bool operator == (Color c)
 	{
 		return r == c.r && g == c.g && b == c.b && a == c.a;
@@ -336,11 +341,15 @@ struct Color
 			   (((uint8_t)(b * 256)) << 0);
 	}
 };
+bool color_eq(void *a, void *b)
+{
+	return ((*(Color *)a) == (*(Color *)b));
+}
 
 
 Color rgb(float red, float green, float blue)
 {
-	return{ 1.0f,red,green,blue };
+	return{ 1.0f, red, green, blue };
 }
 
 float _hue_to_rgb(float p, float q, float t)
@@ -355,6 +364,7 @@ float _hue_to_rgb(float p, float q, float t)
 		return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
 	return p;
 }
+
 Color hsl(float h, float s, float l) {
 	float r, g, b;
 	h = fmod(h,1);

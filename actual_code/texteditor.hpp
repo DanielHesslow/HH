@@ -262,8 +262,11 @@ unsigned int blend_colors(unsigned int color_a, unsigned int color_b)
 // (0)|color a (0a)| color b (0ab)| end color b (0a)| end color a (0)|
 
 
-bool mem_insert(char *block_start, size_t block_length, int insert_length, int insert_index)
+bool mem_insert(char *block_start, size_t block_length, int insert_length, int insert_index, size_t element_size)
 {
+	block_length *= element_size;
+	insert_length *= element_size;
+	insert_index *= element_size;
 
 	if (insert_index < 0 ||  insert_index >= block_length) return false; // byte_index outsisde of block
 
@@ -280,100 +283,242 @@ bool mem_insert(char *block_start, size_t block_length, int insert_length, int i
 	}
 	return true;
 }
+//mem_insert((char *)colors, c_length, -1, j, sizeof(Color)); // if we wan't to keep order later? I doubt mixing three thing will even be a thing...
 
-
-void apply_colors(ORD_DynamicArray_CharRenderingChange *changes)
+Color avg_colors(Color *arr, int len)
 {
-	Color colors[200]; // todo alloc if bigger  (not just fail)
-	int c_length=0;
+	if (len == 0) return{ 0,0,0,0 };
+	Color ack = arr[0];
+	for (int j = 1; j < len; j++) //avg the colors
+	{
+		ack = ack + arr[j];
+	}
+	return ack / len;
+}
+float avg(float *arr, int len)
+{
+	float ack = 0;
+	for (int i = 0; i < len; i++)
+	{
+		ack += arr[i];
+	}
+	return ack;
+}
+
+bool float_eq(void *a, void *b)
+{
+	return *(float *)a == *(float*)b;
+}
+bool ptr_to_ptr_eq(void *a, void *b) {
+	return *(void **)a == *(void **)b;
+}
+
+
+
+#define MAX_SIMULTANIOUS_CHANGES 200
+void apply_changes(TextBuffer *textBuffer, ORD_DynamicArray_CharRenderingChange *changes)
+{
+	// todo alloc if bigger  (not just fail )
+	// 200 does seem quite exessive though.
+	// how about foreground text / background colors though? does they need to be mixed at some point? 
+	Color foreground_colors[MAX_SIMULTANIOUS_CHANGES];
+	Color background_colors[MAX_SIMULTANIOUS_CHANGES];
+	Color highlight_colors[MAX_SIMULTANIOUS_CHANGES];
+	float scales[MAX_SIMULTANIOUS_CHANGES];
+	Typeface::Font *fonts[MAX_SIMULTANIOUS_CHANGES];
+	int highlight_length, background_length, foreground_length, scale_length, font_length;
+	highlight_length = background_length = foreground_length = scale_length = font_length = 0;
+
+
 	for (int i = 0; i < changes->length; i++)
 	{
 		if (changes->start[i].type == rendering_change_highlight_color)
 		{
 			if (changes->start[i].start)
 			{
-				assert(c_length < 198);
-				colors[c_length++] = changes->start[i].raw.color;
+				assert(highlight_length < MAX_SIMULTANIOUS_CHANGES);
+				highlight_colors[highlight_length++] = changes->start[i].raw.color;
 			}
 			else
 			{
-				for (int j = c_length - 1; j >= 0; j--)
-				{
-					if (colors[j] == changes->start[i].raw.color)
-					{
-						colors[j] == colors[--c_length];
-						break;
-					}
-				}
+				int find_index;
+				bool found = search(highlight_colors, highlight_length, sizeof(Color), &changes->start[i].raw.color, color_eq, &find_index);
+				assert(found);
+				highlight_colors[find_index] = highlight_colors[--highlight_length];
 			}
-
-			Color ack = {0,0,0,0};
-			for (int j = 0; j < c_length; j++)
+			changes->start[i].applied.color = (highlight_length ? (int)avg_colors(highlight_colors, highlight_length) : textBuffer->initial_rendering_state.highlight_color);
+		}
+		else if (changes->start[i].type == rendering_change_background_color)
+		{
+			if (changes->start[i].start)
 			{
-				ack = ack + colors[j];
+				assert(background_length < MAX_SIMULTANIOUS_CHANGES);
+				background_colors[background_length++] = changes->start[i].raw.color;
 			}
-			ack = ack / c_length;
-			int ack_i = (int)colors[c_length - 1];
-			changes->start[i].applied.color = (int)colors[c_length-1];
+			else
+			{
+				int find_index;
+				bool found = search(background_colors, background_length, sizeof(Color), &changes->start[i].raw.color, color_eq, &find_index);
+				assert(found);
+				background_colors[find_index] = background_colors[--background_length];
+			}
+			changes->start[i].applied.color = (background_length ? (int)avg_colors(background_colors, background_length) : textBuffer->initial_rendering_state.background_color);
+		}
+		else if (changes->start[i].type == rendering_change_color)
+		{
+			if (changes->start[i].start)
+			{
+				assert(foreground_length < MAX_SIMULTANIOUS_CHANGES);
+				foreground_colors[foreground_length++] = changes->start[i].raw.color;
+			}
+			else
+			{
+				int find_index;
+				bool found = search(foreground_colors, foreground_length, sizeof(Color), &changes->start[i].raw.color, color_eq, &find_index);
+				assert(found);
+				foreground_colors[find_index] = foreground_colors[--foreground_length];
+			}
+			changes->start[i].applied.color = (foreground_length ? (int)avg_colors(foreground_colors, foreground_length) : textBuffer->initial_rendering_state.color);
+		}
+		else if (changes->start[i].type == rendering_change_color)
+		{
+			if (changes->start[i].start)
+			{
+				assert(foreground_length < MAX_SIMULTANIOUS_CHANGES);
+				foreground_colors[foreground_length++] = changes->start[i].raw.color;
+			}
+			else
+			{
+				int find_index;
+				bool found = search(foreground_colors, foreground_length, sizeof(Color), &changes->start[i].raw.color, color_eq, &find_index);
+				assert(found);
+				foreground_colors[find_index] = foreground_colors[--foreground_length];
+			}
+			changes->start[i].applied.color = (foreground_length ? (int)avg_colors(foreground_colors, foreground_length) : textBuffer->initial_rendering_state.color);
+		}
+		else if (changes->start[i].type == rendering_change_font)
+		{
+			if (changes->start[i].start)
+			{
+				assert(foreground_length < MAX_SIMULTANIOUS_CHANGES);
+				fonts[font_length++] = changes->start[i].raw.font;
+			}
+			else
+			{ // for now no blending, at somepoint we might wan't to combine bold & italic to bold italic etc. for now though. Who cares?
+				int find_index;
+				bool found = search(fonts, font_length, sizeof(Typeface::Font *), &changes->start[i].raw.font, ptr_to_ptr_eq, &find_index);
+				assert(found);
+				mem_insert((char *)fonts, font_length, -1, find_index, sizeof(void *));
+				fonts[find_index] = fonts[--font_length];
+			}
+			changes->start[i].applied.font = (font_length ? fonts[font_length-1] : textBuffer->initial_rendering_state.font);
+		}
+		else 
+		{
+			assert(changes->start[i].type == rendering_change_scale);
+			if (changes->start[i].start)
+			{
+				assert(foreground_length < MAX_SIMULTANIOUS_CHANGES);
+				scales[scale_length++] = changes->start[i].raw.scale;
+			}
+			else
+			{ 
+				int find_index;
+				bool found = search(scales, scale_length, sizeof(float), &changes->start[i].raw.scale, float_eq, &find_index);
+				assert(found);
+				scales[find_index] = scales[--scale_length];
+			}
+			changes->start[i].applied.scale = (scale_length ? avg(scales,scale_length): textBuffer->initial_rendering_state.scale);
 		}
 	}
 }
 
-void change_rendering_scale(TextBuffer *textBuffer, Location loc, float new_scale, void *owner)
+void change_rendering_scale(TextBuffer *textBuffer, Location loc, float new_scale, bool start, void *owner)
 {
 	CharRenderingChange change = {};
 	change.raw.scale = new_scale;
-	change.applied.scale= new_scale;
 	change.location = loc;
 	change.type = rendering_change_scale;
 	change.owner = owner;
+	change.start = start;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+	apply_changes(textBuffer, &textBuffer->rendering_changes);
+}
+void change_rendering_scale(TextBuffer *textBuffer, Location loc_start, Location loc_end, float new_scale, void *owner)
+{
+	change_rendering_scale(textBuffer, loc_start, new_scale, true, owner);
+	change_rendering_scale(textBuffer, loc_end, new_scale, false, owner);
 }
 
-void change_rendering_color(TextBuffer *textBuffer, Location loc, Color new_color, void *owner)
+void change_rendering_color(TextBuffer *textBuffer, Location loc, Color new_color,bool start, void *owner)
 {
 	CharRenderingChange change = {};
 	change.raw.color= new_color;
-	change.applied.color = (int)new_color;
 	change.location = loc;
 	change.type = rendering_change_color;
 	change.owner = owner;
+	change.start = start;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+	apply_changes(textBuffer, &textBuffer->rendering_changes);
+}
+void change_rendering_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
+{
+	change_rendering_color(textBuffer, loc_start, new_color, true, owner);
+	change_rendering_color(textBuffer, loc_end, new_color, false, owner);
 }
 
-void change_rendering_background_color(TextBuffer *textBuffer, Location loc, Color new_color, void *owner)
+void change_rendering_background_color(TextBuffer *textBuffer, Location loc, Color new_color, bool start, void *owner)
 {
 	CharRenderingChange change = {};
 	change.raw.color = new_color;
-	change.applied.color =(int)new_color;
 	change.location = loc;
 	change.type = rendering_change_background_color;
 	change.owner = owner;
+	change.start = start;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+	apply_changes(textBuffer, &textBuffer->rendering_changes);
+}
+void change_rendering_background_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
+{
+	change_rendering_background_color(textBuffer, loc_start, new_color, true, owner);
+	change_rendering_background_color(textBuffer, loc_end, new_color, false, owner);
 }
 
-void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc, Color new_color, void *owner)
+void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc, Color new_color, bool start, void *owner)
 {
 	CharRenderingChange change = {};
 	change.raw.color= new_color;
 	change.location = loc;
 	change.type = rendering_change_highlight_color;
 	change.owner = owner;
-	change.start = true;
+	change.start = start;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
-	apply_colors(&textBuffer->rendering_changes);
+	apply_changes(textBuffer, &textBuffer->rendering_changes);
+}
+void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
+{
+	change_rendering_highlight_color(textBuffer, loc_start, new_color, true, owner);
+	change_rendering_highlight_color(textBuffer, loc_end, new_color, false, owner);
 }
 
-void change_rendering_font(TextBuffer *textBuffer, Location loc, Typeface::Font *new_font, void *owner)
+void change_rendering_font(TextBuffer *textBuffer, Location loc, Typeface::Font *new_font, bool start, void *owner)
 {
 	CharRenderingChange change = {};
 	change.raw.font = new_font;
-	change.applied.font = new_font;
 	change.location = loc;
 	change.type = rendering_change_font;
 	change.owner = owner;
+	change.start = start;
 	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+	apply_changes(textBuffer, &textBuffer->rendering_changes);
 }
+
+void change_rendering_font(TextBuffer *textBuffer, Location loc_start, Location loc_end, Typeface::Font *new_font, void *owner)
+{
+	change_rendering_font(textBuffer, loc_start, new_font, true, owner);
+	change_rendering_font(textBuffer, loc_end, new_font, false, owner);
+}
+
 
 
 CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRenderingChange change)
@@ -395,7 +540,6 @@ CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRender
 	case rendering_change_scale:
 		rendering.scale = change.applied.scale;
 		break;
-
 	}
 	return rendering;
 }
@@ -2689,6 +2833,7 @@ inline float abs(float f)
 {
 	return f >= 0 ? f : -f;
 }
+
 internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,bool drawCaret)
 {
 	int visibleLines = calculateVisibleLines(textBuffer, bitmap, textBuffer->lastWindowLineOffset);
@@ -2696,7 +2841,9 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	float targetY = clamp(round(textBuffer->lastWindowLineOffset), line - visibleLines+1, line);
 	
 	float diff = (targetY - textBuffer->lastWindowLineOffset);
-	float dy = abs(diff) > 0.05 ? diff * 0.05 : diff;
+	int LH_q = lineHeightFromLine(textBuffer, textBuffer->lastWindowLineOffset);
+	float speed = 1.5 / LH_q; // *dt ain't right when (int)(winoffset) != (int)(winoffset+dy)... It jumps 
+	float dy = abs(diff) > speed ? diff * speed : diff;
 	
 	int min = -textBuffer->caretX + 40;
 	int max = bitmap.width*3-textBuffer->caretX-x-x-40;  //magic, caret width....
@@ -2716,14 +2863,12 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	float firstScale = scaleFromLine(textBuffer, textBuffer->lastWindowLineOffset);
 	int firstLH = lineHeightFromLine(textBuffer, textBuffer->lastWindowLineOffset);
 	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, textBuffer->lastWindowLineOffset);
-	//fillBitmap(textBuffer, bitmap, textBuffer->lastWindowLineOffset, y - rendering.font->descent * firstScale );
 	
-
 	textBuffer->lastWindowLineOffset = textBuffer->lastWindowLineOffset + dy;
 	float ddy = fmod(textBuffer->lastWindowLineOffset,1);
 	
 	renderBackground(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1 - ddy)*	firstLH, drawCaret);
-	renderText(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1-ddy)*	firstLH, drawCaret);
+	renderText(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1-ddy) *	firstLH, drawCaret);
 }
 
 internal void clearBuffer(MultiGapBuffer *buffer)
@@ -2747,34 +2892,38 @@ internal int getIndentLine(TextBuffer buffer, int line)
 	} while (getNext(buffer.backingBuffer->buffer, &it));
 	return c;
 }
+void _moveUp(TextBuffer *textBuffer, Mods mods);
+void _moveDown(TextBuffer *textBuffer, Mods mods);
 
 
-internal void movePage(TextBuffer *textBuffer, Bitmap bitmap, bool up)
+internal void movePage(TextBuffer *textBuffer, bool up)
 {
-#if 0
-	fucking_fix_me_please
-
-	//this is not a traditional movepage.
-	// it moves the cursor one page.
-	// not the screen.
-	// this is not acceptable but neither is it a huge problem.
-	// therefore we should fix it at another time. 
-	int visibleLines = calculateVisibleLines(textBuffer, bitmap, textBuffer->lastWindowLineOffset)-1;
+	int h = 760; //heh
+	int c = 0;
+	int line = textBuffer->lastWindowLineOffset;
+	int lines = getLines(textBuffer->backingBuffer);
 	if (up)
 	{
-		for (int i = 0; i < visibleLines; i++)
+		for (;;)
 		{
-			moveUp(textBuffer, false, currentCaretIndex);
+			if (h < 0 || line <= 0)break;
+			h -= lineHeightFromLine(textBuffer, line--);
+			++c;
+			--textBuffer->lastWindowLineOffset;
 		}
+		for (int i = 0; i < c; i++) _moveUp(textBuffer, (Mods)0);
 	}
 	else
 	{
-		for (int i = 0; i < visibleLines; i++)
+		for (;;)
 		{
-			moveDown(textBuffer, false,currentCaretIndex);
+			if (h < 0 || line >= lines)break;
+			h -= lineHeightFromLine(textBuffer, line++);
+			++c;
+			++textBuffer->lastWindowLineOffset;
 		}
+		for (int i = 0; i < c; i++) _moveDown(textBuffer, (Mods)0);
 	}
-#endif 
 }
 
 internal int getNextTokenHash(MultiGapBuffer *buffer, MGB_Iterator *it, int *counter)
@@ -2817,21 +2966,23 @@ internal bool stripInitialWhite(MultiGapBuffer *buffer, MGB_Iterator *it, int *c
 
 internal void initTextBuffer(TextBuffer *textBuffer)
 {
+	bool start = true;
+	bool end = false;
+
 	int caret_i = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedCarets_id, caret_i);
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
 	_setLocalBindings(textBuffer);
-	change_rendering_color(textBuffer,              { 10, 0 }, { 1,.8f,.5f,.8f }, 0);
-	change_rendering_highlight_color(textBuffer,	{ 10, 0 }, { 1,.5f,.5f,.8f }, 0);
-	change_rendering_scale(textBuffer,				{ 10, 0 }, textBuffer->initial_rendering_state.scale* 5, 0);
-	change_rendering_font(textBuffer,				{ 10, 0 }, getFont(DHSTR_MAKE_STRING("Arial Italic")), 0);
+	Color f = rgb(.5, .5, .8);
+	Color s = rgb(.3, .8, .3);
+	Typeface::Font *fnt = getFont(DHSTR_MAKE_STRING("Arial Italic"));
 
-	change_rendering_color(textBuffer,				{ 10, 10 }, { 1,.5f,.8f,.8f }, 0);
-	change_rendering_highlight_color(textBuffer, { 10, 10 }, {0,0,0,0}, 0);
-	change_rendering_scale(textBuffer,				{ 10, 10 }, textBuffer->initial_rendering_state.scale, 0);
-	change_rendering_font(textBuffer,				{ 10, 10 }, getFont(DHSTR_MAKE_STRING("Arial Unicode")), 0);
-	
+	change_rendering_color(textBuffer, { 10, 0 }, {10,10}, { 1, .8f, .5f, .8f },  0);
+	change_rendering_highlight_color(textBuffer, { 10, 0 }, { 10,10 }, f, 0);
+	change_rendering_scale(textBuffer, { 10, 0 } ,{10,10}, textBuffer->initial_rendering_state.scale * 5, 0);
+	change_rendering_font(textBuffer,				{ 10, 0 }, { 10, 10},fnt, 0);
+	change_rendering_highlight_color(textBuffer, { 10, 3 }, { 10, 20 }, s,  0);
 }
 
 internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
