@@ -433,93 +433,63 @@ void apply_changes(TextBuffer *textBuffer, ORD_DynamicArray_CharRenderingChange 
 	}
 }
 
-void change_rendering_scale(TextBuffer *textBuffer, Location loc, float new_scale, bool start, void *owner)
+void change_rendering_base(TextBuffer *textBuffer, Location start, Location end, CharRenderingChange partial_change)
 {
-	CharRenderingChange change = {};
-	change.raw.scale = new_scale;
-	change.location = loc;
-	change.type = rendering_change_scale;
-	change.owner = owner;
-	change.start = start;
-	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
+	partial_change.location = start;
+	partial_change.start = true;
+	Insert(&textBuffer->rendering_changes, partial_change, ordered_insert_last);
+
+	partial_change.start = false;
+	partial_change.location = end;
+	Insert(&textBuffer->rendering_changes, partial_change, ordered_insert_last);
 	apply_changes(textBuffer, &textBuffer->rendering_changes);
-}
-void change_rendering_scale(TextBuffer *textBuffer, Location loc_start, Location loc_end, float new_scale, void *owner)
-{
-	change_rendering_scale(textBuffer, loc_start, new_scale, true, owner);
-	change_rendering_scale(textBuffer, loc_end, new_scale, false, owner);
+
 }
 
-void change_rendering_color(TextBuffer *textBuffer, Location loc, Color new_color,bool start, void *owner)
-{
-	CharRenderingChange change = {};
-	change.raw.color= new_color;
-	change.location = loc;
-	change.type = rendering_change_color;
-	change.owner = owner;
-	change.start = start;
-	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
-	apply_changes(textBuffer, &textBuffer->rendering_changes);
-}
-void change_rendering_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
-{
-	change_rendering_color(textBuffer, loc_start, new_color, true, owner);
-	change_rendering_color(textBuffer, loc_end, new_color, false, owner);
-}
-
-void change_rendering_background_color(TextBuffer *textBuffer, Location loc, Color new_color, bool start, void *owner)
-{
-	CharRenderingChange change = {};
-	change.raw.color = new_color;
-	change.location = loc;
-	change.type = rendering_change_background_color;
-	change.owner = owner;
-	change.start = start;
-	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
-	apply_changes(textBuffer, &textBuffer->rendering_changes);
-}
 void change_rendering_background_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
 {
-	change_rendering_background_color(textBuffer, loc_start, new_color, true, owner);
-	change_rendering_background_color(textBuffer, loc_end, new_color, false, owner);
+	CharRenderingChange change = {};
+	change.owner = owner;
+	change.raw.color = new_color;
+	change.type = rendering_change_background_color;
+	change_rendering_base(textBuffer, loc_start, loc_end, change);
 }
 
-void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc, Color new_color, bool start, void *owner)
-{
-	CharRenderingChange change = {};
-	change.raw.color= new_color;
-	change.location = loc;
-	change.type = rendering_change_highlight_color;
-	change.owner = owner;
-	change.start = start;
-	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
-	apply_changes(textBuffer, &textBuffer->rendering_changes);
-}
 void change_rendering_highlight_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
 {
-	change_rendering_highlight_color(textBuffer, loc_start, new_color, true, owner);
-	change_rendering_highlight_color(textBuffer, loc_end, new_color, false, owner);
+	CharRenderingChange change = {};
+	change.owner = owner;
+	change.raw.color = new_color;
+	change.type = rendering_change_highlight_color;
+	change_rendering_base(textBuffer, loc_start, loc_end, change);
 }
 
-void change_rendering_font(TextBuffer *textBuffer, Location loc, Typeface::Font *new_font, bool start, void *owner)
+void change_rendering_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
 {
 	CharRenderingChange change = {};
-	change.raw.font = new_font;
-	change.location = loc;
-	change.type = rendering_change_font;
 	change.owner = owner;
-	change.start = start;
-	Insert(&textBuffer->rendering_changes, change, ordered_insert_last);
-	apply_changes(textBuffer, &textBuffer->rendering_changes);
+	change.raw.color = new_color;
+	change.type = rendering_change_color;
+	change_rendering_base(textBuffer, loc_start, loc_end, change);
 }
 
 void change_rendering_font(TextBuffer *textBuffer, Location loc_start, Location loc_end, Typeface::Font *new_font, void *owner)
 {
-	change_rendering_font(textBuffer, loc_start, new_font, true, owner);
-	change_rendering_font(textBuffer, loc_end, new_font, false, owner);
+	CharRenderingChange change = {};
+	change.owner = owner;
+	change.raw.font = new_font;
+	change.type = rendering_change_font;
+	change_rendering_base(textBuffer, loc_start, loc_end, change);
 }
 
-
+void change_rendering_scale(TextBuffer *textBuffer, Location loc_start, Location loc_end, float new_scale, void *owner)
+{
+	CharRenderingChange change = {};
+	change.owner = owner;
+	change.raw.scale= new_scale;
+	change.type = rendering_change_scale;
+	change_rendering_base(textBuffer, loc_start, loc_end, change);
+}
 
 CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRenderingChange change)
 {
@@ -2966,9 +2936,6 @@ internal bool stripInitialWhite(MultiGapBuffer *buffer, MGB_Iterator *it, int *c
 
 internal void initTextBuffer(TextBuffer *textBuffer)
 {
-	bool start = true;
-	bool end = false;
-
 	int caret_i = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedCarets_id, caret_i);
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
