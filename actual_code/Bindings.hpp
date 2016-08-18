@@ -479,7 +479,7 @@ internal void closeBufferCommand(Data *data, DHSTR_String restOfTheBuffer)
 	closeTextBuffer(data);
 }
 
-internal void charDownFileCommand(Data *data,DHSTR_String restOfTheBuffer)
+internal void charDownFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 {
 	freeMenuItems(data);
 	DHSTR_String file;
@@ -563,6 +563,7 @@ internal void removeAllButOneCaret(TextBuffer *buffer)
 		removeCaret(buffer, 1, true);
 	}
 }
+
 
 internal void win32_runBuild(Data *data) //this is *highly* platform dependant. Should be moved to win32.cpp
 {	//and refactor out the openfile into buffeer into its own win32 function.
@@ -697,6 +698,51 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 	}
 }
 
+void find_mark_down(Data *data, DHSTR_String restOfTheBuffer)
+{
+	TextBuffer *buffer = &data->textBuffers.start[data->activeTextBufferIndex];
+	remove_rendering_changes(buffer, find_mark_down);
+
+ 	if (restOfTheBuffer.length == 0 )return;
+
+	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
+	MGB_Iterator it_cpy;
+	MGB_Iterator it = getIterator(mgb);
+	if (!pushValid(mgb,&it))return;
+
+	Location match_location;
+	int i = 0;
+	do {
+		char b = *getCharacter(mgb, it);
+		if (b == restOfTheBuffer.start[i])
+		{
+			if (i == 0)
+			{
+				match_location = locationFromIterator(buffer, it);
+			}
+
+			if (++i == restOfTheBuffer.length)
+			{
+				it_cpy = it;
+				getNext(mgb, &it_cpy);
+				change_rendering_highlight_color(buffer, match_location, locationFromIterator(buffer, it_cpy), active_colorScheme.active_color, find_mark_down);
+				i = 0;
+			}
+		}
+		else
+		{
+			i = 0;
+		}
+	}
+	while (getNext(mgb, &it));
+
+}
+void find(Data *data, DHSTR_String restOfTheBuffer)
+{
+	TextBuffer *buffer = &data->textBuffers.start[data->activeTextBufferIndex];
+	remove_rendering_changes(buffer, find_mark_down);
+}
+
 bool splitPath(DHSTR_String path, DHSTR_String *_out_directory, DHSTR_String *_out_file)
 {
 	bool hashSlash;
@@ -770,50 +816,157 @@ internal void appendVerticalTab(TextBuffer *textBuffer)
 	appendCharacter(textBuffer, u'\v');
 }
 
-struct Locator
-{
-	int line;
-	int pos;
-};
 
-unsigned int hash_loc(Locator loc)
+unsigned int hash_loc(Location loc)
 {
-	return silly_hash(loc.line) * 31 + silly_hash(loc.pos);
+	return silly_hash(loc.line) * 31 + silly_hash(loc.column);
 }
-unsigned int locator_equality(Locator a, Locator b)
+unsigned int locator_equality(Location a, Location b)
 {
-	return a.line == b.line && a.pos == b.pos;
+	return a.line == b.line && a.column == b.column;
 }
-DEFINE_HashTable(Locator, int, hash_loc, locator_equality);
+
+DEFINE_HashTable(Location, int, hash_loc, locator_equality);
+DEFINE_HashTable(int, float, silly_hash, int_eq);
 
 
-internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char, Typeface::Font *typeface, float scale)
+internal bool is_big_title(TextBuffer *textBuffer, int line)
 {
-	BindingIdentifier ident = { 0,&elasticTab };
+	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
+	MGB_Iterator it = iteratorFromLine(textBuffer, line);
+	int ack = 0;
+	do
+	{
+		char c = *getCharacter(mgb, it);
+		if (isLineBreak(c))
+		{
+			break;
+		}
+		else if (c == '-')
+		{
+			if (++ack >= 3)
+			{
+				return  true;
+			}
+		}
+		else
+		{
+			ack = 0;
+		}
+	} while (getNext(mgb, &it));
+	return false;
+}
+internal void init_big_titles(TextBuffer *buffer, HashTable_int_float *memo)
+{
+	float title_size = buffer->initial_rendering_state.scale * 2;
+	clear(memo);
+	for (int i = 0; i < getLines(buffer->backingBuffer); i++)
+	{
+		if (is_big_title(buffer, i))
+		{
+			insert(memo, i, title_size);
+		}
+	}
+}
+
+internal void mark_bigTitles(TextBuffer *buffer)
+{
+	bool changed = false;
+
+	float title_size = buffer->initial_rendering_state.scale * 2;
+
+	remove_rendering_changes(buffer, &bigTitles);
+	BindingIdentifier ident = { 0,&bigTitles };
+	
 	void **memoPtr;
-	HashTable_Locator_int *memo;
+	HashTable_int_float *memo;
 	if (!lookup(&buffer->backingBuffer->bindingMemory, ident, &memoPtr))
 	{
-		memo = (HashTable_Locator_int *) alloc_(sizeof(HashTable_Locator_int), "ElasticTab hashtable struct");
-		*memo = DHDS_constructHT(Locator,int,50,buffer->allocator); //@leak for now, should be bulk deallocated on backingbuffer closing
+		memo = (HashTable_int_float *)alloc_(sizeof(HashTable_int_float), "bigTitles hashtable struct");
+		*memo = DHDS_constructHT(int, float, 50, buffer->allocator);
+		changed = true;
+		init_big_titles(buffer, memo);
+		insert(&buffer->backingBuffer->bindingMemory, ident, memo);
+	}
+	else
+	{
+		memo = (HashTable_int_float *)*memoPtr;
+	}
+
+	BufferChange event;
+	while (next_history_change(buffer->backingBuffer, &mark_bigTitles, &event))
+	{
+		changed = true;
+		fast_forward_history_changes(buffer->backingBuffer, &mark_bigTitles);
+		
+		if (is_big_title(buffer,event.location.line))
+			insert(memo, event.location.line, title_size);
+		else
+			remove(memo, event.location.line,0);
+
+		//lazy af way to handle linebreak lol
+		if (is_big_title(buffer, event.location.line-1))
+			insert(memo, event.location.line-1, title_size);
+		else
+			remove(memo, event.location.line-1, 0);
+
+
+		if (is_big_title(buffer, event.location.line+1))
+			insert(memo, event.location.line+1, title_size);
+		else
+			remove(memo, event.location.line+1, 0);
+	}
+
+	if (changed)
+	{
+		remove_rendering_changes(buffer, &mark_bigTitles);
+
+		for (int i = 0; i < memo->capacity; i++)
+		{
+
+			if (memo->buckets[i].state == bucket_state_occupied)
+			{ 
+				int line  = memo->buckets[i].key;
+				change_rendering_scale(buffer, { line, 0 }, { line + 1,0 }, title_size, mark_bigTitles);
+				change_rendering_color(buffer, { line, 0 }, { line + 1,0 }, active_colorScheme.active_color, mark_bigTitles);
+			}
+		}
+	}
+
+}
+internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char, Typeface::Font *typeface, float scale)
+{
+	int tab_width= getCharacterWidth_std('\t', ' ', typeface, 1);
+
+	//@BUG: we do not account for difference in tab width from different font scales.
+	//maybe also memoize end of elastic tab as well as width of it?
+	BindingIdentifier ident = { 0,&elasticTab };
+	void **memoPtr;
+	HashTable_Location_int *memo;
+	if (!lookup(&buffer->backingBuffer->bindingMemory, ident, &memoPtr))
+	{
+		memo = (HashTable_Location_int *) alloc_(sizeof(HashTable_Location_int), "ElasticTab hashtable struct");
+		*memo = DHDS_constructHT(Location,int,50,buffer->allocator); 
 		insert(&buffer->backingBuffer->bindingMemory,ident,memo);
 	}
 	else
 	{
-		memo = (HashTable_Locator_int *)*memoPtr;
+		memo = (HashTable_Location_int *)*memoPtr;
 	}
-	BufferChange event;
-	bool changed = false;
-	while (next_history_change(buffer->backingBuffer,&elasticTab,&event)) 
-	{
-		changed = true;
-	}
-	if (changed)clear(memo);
 
-	float max_w = calculateIteratorX(buffer, it);
+	BufferChange event;
+	if (next_history_change(buffer->backingBuffer, &elasticTab, &event))
+	{
+		// if we have one history_change we don't care about the rest, we don't want them next time through
+		fast_forward_history_changes(buffer->backingBuffer, &elasticTab);
+		clear(memo);
+	}
+	
+	CharRenderingInfo rend;
+	float our_w = calculateIteratorX(buffer, it,&rend);
+	float max_w = our_w + rend.scale * tab_width;
 	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
 	MGB_Iterator itstart = it;
-	float our_w = max_w;
 	int tab_num = 0;
 	while (getPrev(mgb, &it))
 	{
@@ -825,9 +978,9 @@ internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_ch
 		}
 	}
 	assert(tab_num == 0);
-	Locator loc;
+	Location loc;
 	loc.line = getLineFromIterator(buffer, itstart);
-	loc.pos = tab_num;
+	loc.column = tab_num;
 	int *val;
 	
 	if (lookup(memo, loc, &val)){
@@ -849,7 +1002,9 @@ internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_ch
 			{
 				if (ctab++ == tab_num)
 				{
-					max_w = max(max_w, calculateIteratorX(buffer, it));
+					// keep tmp on a seperate line to avoid undeffed behaviour, rend can't be modified and used in the same statment
+					int tmp = calculateIteratorX(buffer, it,&rend);
+					max_w = max(max_w, tmp + rend.scale*tab_width); 
 					break;
 				}
 			}
@@ -873,7 +1028,9 @@ next:
 			{
 				if (ctab++ == tab_num)
 				{
-					max_w = max(max_w, calculateIteratorX(buffer, it));
+					// keep tmp on a seperate line to avoid undeffed behaviour, rend can't be modified and used in the same statment
+					int tmp = calculateIteratorX(buffer, it, &rend);
+					max_w = max(max_w, tmp + rend.scale*tab_width);
 					while (getNext(mgb, &it) && !isLineBreak(*getCharacter(mgb, it)));
 					break;
 				}
@@ -881,13 +1038,17 @@ next:
 		}
 	}
 end:
-	int ret = max_w - our_w + getCharacterWidth_std('\t', ' ', typeface, scale);
+	//out commented because of bug mentioned above.
+	int ret = max_w - our_w;
 	insert(memo, loc, ret);
 	return ret;
 }
 
 internal void setBindingsLocal(TextBuffer *textBuffer)
 {
+	Add(&textBuffer->renderingModifiers, &mark_selection);
+	Add(&textBuffer->renderingModifiers, &mark_bigTitles);
+
 	bindKey(VK_LEFT, atMost, mod_control | mod_shift, _moveLeft);
 	bindKey(VK_RIGHT, atMost, mod_control | mod_shift, _moveRight);
 	bindKey(VK_BACK, atMost, mod_control, _backSpace);
@@ -932,7 +1093,8 @@ internal void setBindingsLocal(TextBuffer *textBuffer)
 		bindCommand("o", openFileCommand, charDownFileCommand);
 		bindCommand("createFile", createFile);
 		bindCommand("closeBuffer", closeBufferCommand);
-		bindCommand("c", closeBufferCommand); 
+		bindCommand("c", closeBufferCommand);
+		bindCommand("find",  find, find_mark_down);
 	}
 
 	bindKey(VK_LEFT, precisely, mod_alt, moveActiveBufferLeft);

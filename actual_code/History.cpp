@@ -79,6 +79,8 @@ void addChangeEvent(TextBuffer *textBuffer, HistoryEntry entry)
 {
 	Location loc = entry.location;
 	BufferChangeAction action;
+	DynamicArray_BufferChange *change_log = &textBuffer->backingBuffer->history.change_log;
+
 	switch (entry.action)
 	{
 	case action_move:
@@ -352,12 +354,16 @@ void logMoved(TextBuffer *textBuffer, Direction direction, bool selection, int c
 {
 	History *history = &textBuffer->backingBuffer->history;
 	int prev_index=history->current_index;
+	for (int i = 0; i < textBuffer->backingBuffer->binding_next_change.capacity;i++)
+	{
+		textBuffer->backingBuffer->binding_next_change.buckets[i].value.move_change = true;
+	}
 	while (get_prev_HistoryEntry_index(history, &prev_index))
 	{
 		HistoryEntry *prev = &history->entries.start[prev_index];
 		if (prev->action == action_move)
 		{
-			if (prev->caretIdIndex == caretIdIndex && prev->selection == selection)
+			if (prev->caretIdIndex == caretIdIndex && prev->selection == selection) //reuse the old one
 			{
 				prev->direction += intFromDir(direction);
 				return;
@@ -404,13 +410,37 @@ void logRemoveCaret(TextBuffer *textBuffer, int pos_caret, int pos_selection, in
 	log_base(textBuffer, prev_entry);
 }
 
+void fast_forward_history_changes(BackingBuffer *buffer, void *function)
+{
+	HistoryChangeTracker *change_tracker;
+	if (!lookup(&buffer->binding_next_change, function, &change_tracker))
+	{
+		change_tracker = insert(&buffer->binding_next_change, function, {});
+	}
+	change_tracker->next_index = buffer->history.change_log.length;
+	change_tracker->move_change = false;
+}
+
+bool has_move_changed(BackingBuffer *buffer, void *function)
+{
+	HistoryChangeTracker *change_tracker;
+	if (!lookup(&buffer->binding_next_change, function, &change_tracker))
+	{
+		HistoryChangeTracker ch = {};
+		ch.next_index = 0;
+		change_tracker = insert(&buffer->binding_next_change, function, ch);
+	}
+	bool ret = change_tracker->move_change;
+	change_tracker->move_change = false;
+	return ret;
+}
+
 bool next_history_change(BackingBuffer *buffer, void *function, BufferChange *_out_change)
 { 
 	HistoryChangeTracker *change_tracker;
 	if (!lookup(&buffer->binding_next_change, function, &change_tracker)) 
 	{
 		HistoryChangeTracker ch = {};
-		ch.next_index = 0;
 		change_tracker = insert(&buffer->binding_next_change, function, ch);
 	}
 	DynamicArray_HistoryEntry entries = buffer->history.entries;

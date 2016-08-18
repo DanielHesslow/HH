@@ -11,7 +11,7 @@ struct ColorScheme
 Color _highlightColor = rgb(.25,.25,.25);
 Color _foregroundColor = rgb(.8f,.8f,.8f);
 
-Color _caret_light = rgb(.2f,.3f,.8f);
+Color _caret_light = rgb(.1f,.6f,.8f);
 Color _caret_dark = rgb(.2f,.3f,.8f );
 Color _active_color = hsl(.09,.9f,.5);
 

@@ -218,7 +218,7 @@ unsigned int silly_bind_ident_hash(BindingIdentifier ident) {
 unsigned int silly_hash_void_ptr(void *ptr) {
 	return silly_hash((int)(long long)(ptr));
 }
-
+	
 bool ptr_eq(void *a, void *b) {
 	return a == b;
 }
@@ -226,6 +226,7 @@ bool ptr_eq(void *a, void *b) {
 struct HistoryChangeTracker
 {
 	int next_index;
+	bool move_change;
 };
 
 DEFINE_HashTable(BindingIdentifier, PVOID, silly_bind_ident_hash, bind_ident_eq)
@@ -244,7 +245,6 @@ struct BackingBuffer
 	DHSTR_String path; 
 	DH_Allocator allocator;
 };
-
 
 
 struct CursorInfo
@@ -419,11 +419,17 @@ inline int cmp_int(int a, int b)
 	return (a > b) - (a < b); //+1,-1, 0 are possible return values
 }
 
-inline int cmpCharRenderingChange(void *v_a, void *v_b)
+inline int cmp_Location(void *v_a, void *v_b)
 {
-	CharRenderingChange a = *(CharRenderingChange *)v_a;
-	CharRenderingChange b = *(CharRenderingChange *)v_b;
-	return cmp_int(a.location.line, b.location.line) << 1 | cmp_int(a.location.column, b.location.column);
+	Location a = *(Location *)v_a;
+	Location b = *(Location *)v_b;
+	return cmp_int(a.line, b.line) * 2 + cmp_int(a.column, b.column);
+
+}
+#define DHMA_OFFSET_OF(s, value)((size_t)&(((s*) 0)->value))
+inline int cmpCharRenderingChange(void *a, void*b)
+{
+	return cmp_Location((char *)a + DHMA_OFFSET_OF(CharRenderingChange, location), (char *)b + DHMA_OFFSET_OF(CharRenderingChange, location));
 }
 DEFINE_Complete_ORD_DynamicArray(CharRenderingChange, cmpCharRenderingChange);
 
@@ -444,16 +450,17 @@ struct CharRenderingInfo
 	Typeface::Font *font;
 };
 
-
+typedef void(*RenderingModifier)(TextBuffer *textBuffer);
+DEFINE_DynamicArray(RenderingModifier);
 struct TextBuffer
 {
 	BufferType bufferType;
 	BackingBuffer *backingBuffer;
+	DynamicArray_RenderingModifier renderingModifiers;
 
 	DynamicArray_KeyBinding KeyBindings;
 
 	int lines;
-	int caretX;
 
 	DHSTR_String fileName;
 
@@ -474,6 +481,7 @@ struct TextBuffer
 	float lastWindowLineOffset;
 	int dx;
 	uint64_t lastAction;
+	bool rendering_change_is_dirty;
 };
 
 bool ownsCaret(TextBuffer *buffer, int index)
@@ -553,7 +561,7 @@ internal char *getRestAsString(MultiGapBuffer *buffer, MGB_Iterator it);
 internal void		CloseCommandLine(Data *data);
 void setNoSelection(TextBuffer *textBuffer, log_ log);
 internal void removeSelection(TextBuffer *textBuffer);
-internal MGB_Iterator getIteratorAtLine(TextBuffer *textBuffer, int line);
+internal MGB_Iterator iteratorFromLine(TextBuffer *textBuffer, int line);
 internal int getLineFromCaret(TextBuffer *buffer, int caretId);
 internal void gotoStartOfLine(TextBuffer *textBuffer, int line, select_ selection, int caretIdIndex);
 internal bool validSelection(TextBuffer *buffer);
@@ -561,6 +569,8 @@ internal void moveWhile(TextBuffer *textBuffer, select_ selection, log_ log, boo
 internal bool whileSameLine(char character, int *state);
 internal void move(TextBuffer *textBuffer, Direction dir, log_ log, select_ selection);
 internal bool move(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection);
+bool getActiveBuffer(Data *data, TextBuffer **activeBuffer_out);
+
 enum MoveMode
 {
 	movemode_byte,

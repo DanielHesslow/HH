@@ -81,13 +81,13 @@ internal void win32ResizeDIBSection(win32OffScreenBuffer *bitmap, int width, int
 
 internal void win32UpdateWindow(HDC deviceContext, int windowWidth, int windowHeight, win32OffScreenBuffer bitmap)
 {
-	StretchDIBits(deviceContext,
-				 0,0,windowWidth,windowHeight,
-				 0,0,bitmap.bitmap.width,bitmap.bitmap.height,
-				 bitmap.bitmap.memory,
-				 &bitmap.info,
-				 DIB_RGB_COLORS,
-				 SRCCOPY);
+	// so this is fucking slow. I'd rather it wasn't but idk. Don't know how BitBlt works and if it would work?
+	SetDIBitsToDevice(deviceContext,
+		0, 0, windowWidth, windowHeight,
+		0, 0, 0, bitmap.bitmap.height,
+		bitmap.bitmap.memory,
+		&bitmap.info,
+		DIB_RGB_COLORS);
 }
 
 

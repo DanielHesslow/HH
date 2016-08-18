@@ -61,5 +61,6 @@ internal bool isEmptyCaret(MultiGapBuffer *buffer, DynamicArray_int *ids, int in
 internal bool removeCharacter(MultiGapBuffer *buffer, int caretId);
 internal void invDelete(MultiGapBuffer *buffer, int caretId, char character);
 internal void appendCharacter(MultiGapBuffer *buffer, int caretId, char character);
+bool pushValid(MultiGapBuffer *buffer, MGB_Iterator *it);
 internal void grow(MultiGapBuffer *buffer);
 #endif

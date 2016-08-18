@@ -126,7 +126,7 @@ InternalClipboard deSerialize_InternalClipboard(char **buffer)
 internal char16_t *getLineAsString(TextBuffer *buffer, int caretIdIndex)
 {
 	MultiGapBuffer *mg_buffer = buffer->backingBuffer->buffer;
-	MGB_Iterator it = getIteratorAtLine(buffer, getLineFromCaret(buffer, buffer->ownedCarets_id.start[caretIdIndex]));
+	MGB_Iterator it = iteratorFromLine(buffer, getLineFromCaret(buffer, buffer->ownedCarets_id.start[caretIdIndex]));
 	DynamicArray_char16_t dynamicString = constructDynamicArray_char16_t(50, "getLineAsString");
 	for (;;)
 	{

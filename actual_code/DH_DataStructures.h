@@ -354,7 +354,7 @@ value_type *insert(HashTable_##key_type##_##value_type *hashtable, key_type key,
 	{\
 		assert(index >=0 && index < hashtable->capacity);\
 		++iterations;\
-		if(hashtable->buckets[index].state != bucket_state_occupied|| key_equality_func(hashtable->buckets[index].key, key)) break; \
+		if(hashtable->buckets[index].state != bucket_state_occupied|| key_equality_func(hashtable->buckets[index].key, key)) {--hashtable->length; break;} \
 		++index;\
 		index %= hashtable->capacity;\
 	}\

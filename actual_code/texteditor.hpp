@@ -12,6 +12,10 @@
 
 #include <stdint.h>
 #include "platform.h"
+#define DH_MEMSET_IMPLEMENTATION
+#define DH_memset_32 memset_32
+#include "DH_memset_32.h"
+
 inline uint64_t ciel_to_multiple_of(uint64_t i, int mult);
 
 struct DH_Allocator
@@ -30,8 +34,6 @@ void *Allocate(DH_Allocator allocator, size_t bytes_to_alloc, void *allocation_i
 {
 	return allocator.alloc(bytes_to_alloc, allocation_info, allocator.data);
 }
-
-
 
 void DeAllocate(DH_Allocator allocator, void *mem)
 {
@@ -65,8 +67,7 @@ internal int getLineLength(TextBuffer *textBuffer, int line);
 
 CharRenderingInfo apply_rendering_changes_at(TextBuffer *textBuffer, Location loc, CharRenderingInfo rendering);
 
-
-internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
+internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it, CharRenderingInfo *_out_rendering_state_at_iterator = 0)
 {
 	//either us or move caret to X have some sort of problem (all or just high unicode stuff?)
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
@@ -82,7 +83,7 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 	}
 	if (!MoveIterator(mgb, &it, 1));
 
-	Location loc = {line,0};
+	Location loc = { line,0 };
 	char32_t codepoint_a, codepoint_b;
 	int ack = getCodepoint(mgb, it, &codepoint_a);
 	MGB_Iterator prev_it = it;
@@ -102,9 +103,9 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it)
 		prev_it = tmp;
 		++loc.column;
 	}
+	if (_out_rendering_state_at_iterator) *_out_rendering_state_at_iterator = rendering;
 	return x_ack;
 }
-
 
 internal int calculateCursorX(TextBuffer *textBuffer, int cursorId)
 {
@@ -113,11 +114,11 @@ internal int calculateCursorX(TextBuffer *textBuffer, int cursorId)
 	return calculateIteratorX(textBuffer, it);
 }
 
-
 internal void markPreferedCaretXDirty(TextBuffer *textBuffer, int caretIdIndex)
 {
 	textBuffer->cursorInfo.start[caretIdIndex].is_dirty = true;
 }
+
 internal void setPreferedX(TextBuffer *textBuffer, int caretIdIndex)
 {
 	if (textBuffer->cursorInfo.start[caretIdIndex].is_dirty)
@@ -283,7 +284,6 @@ bool mem_insert(char *block_start, size_t block_length, int insert_length, int i
 	}
 	return true;
 }
-//mem_insert((char *)colors, c_length, -1, j, sizeof(Color)); // if we wan't to keep order later? I doubt mixing three thing will even be a thing...
 
 Color avg_colors(Color *arr, int len)
 {
@@ -295,6 +295,7 @@ Color avg_colors(Color *arr, int len)
 	}
 	return ack / len;
 }
+
 float avg(float *arr, int len)
 {
 	float ack = 0;
@@ -309,6 +310,7 @@ bool float_eq(void *a, void *b)
 {
 	return *(float *)a == *(float*)b;
 }
+
 bool ptr_to_ptr_eq(void *a, void *b) {
 	return *(void **)a == *(void **)b;
 }
@@ -316,8 +318,16 @@ bool ptr_to_ptr_eq(void *a, void *b) {
 
 
 #define MAX_SIMULTANIOUS_CHANGES 200
-void apply_changes(TextBuffer *textBuffer, ORD_DynamicArray_CharRenderingChange *changes)
+void apply_changes(TextBuffer *textBuffer)
 {
+	// All cases are basically the same
+	// we might be able to abstract them out, but I don't think
+	// it'll simplyfy things. (code will probably be shorter though)
+
+	if (!textBuffer->rendering_change_is_dirty) return; // meh might as well 
+	textBuffer->rendering_change_is_dirty = false;
+
+	ORD_DynamicArray_CharRenderingChange *changes = &textBuffer->rendering_changes;
 	// todo alloc if bigger  (not just fail )
 	// 200 does seem quite exessive though.
 	// how about foreground text / background colors though? does they need to be mixed at some point? 
@@ -437,13 +447,15 @@ void change_rendering_base(TextBuffer *textBuffer, Location start, Location end,
 {
 	partial_change.location = start;
 	partial_change.start = true;
+	int index;
+	bool success = binary_search(&textBuffer->rendering_changes, partial_change, &index);
+
 	Insert(&textBuffer->rendering_changes, partial_change, ordered_insert_last);
 
 	partial_change.start = false;
 	partial_change.location = end;
 	Insert(&textBuffer->rendering_changes, partial_change, ordered_insert_last);
-	apply_changes(textBuffer, &textBuffer->rendering_changes);
-
+	textBuffer->rendering_change_is_dirty = true;
 }
 
 void change_rendering_background_color(TextBuffer *textBuffer, Location loc_start, Location loc_end, Color new_color, void *owner)
@@ -491,6 +503,28 @@ void change_rendering_scale(TextBuffer *textBuffer, Location loc_start, Location
 	change_rendering_base(textBuffer, loc_start, loc_end, change);
 }
 
+void remove_rendering_changes(TextBuffer *textBuffer, void *owner = 0)
+{
+	if (owner == 0)
+	{
+		textBuffer->rendering_changes.length = 0;
+	}
+	else
+	{
+		//possibly make this lazy if this turns out to be slow?
+		for (int i = 0; i < textBuffer->rendering_changes.length; i++)
+		{
+			if (textBuffer->rendering_changes.start[i].owner == owner)
+			{
+				Remove(&textBuffer->rendering_changes, i);
+				--i;
+			}
+		}
+	}
+	textBuffer->rendering_change_is_dirty = true;
+}
+
+
 CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRenderingChange change)
 {
 	switch (change.type)
@@ -516,6 +550,7 @@ CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRender
 
 CharRenderingInfo apply_rendering_changes_at(TextBuffer *textBuffer, Location loc, CharRenderingInfo rendering)
 {
+	if (textBuffer->rendering_change_is_dirty) apply_changes(textBuffer);
 	CharRenderingChange ch = {};
 	ch.location = loc;
 	int index;
@@ -737,6 +772,14 @@ internal int getLineFromIterator(TextBuffer *buffer, MGB_Iterator it)
 {
 	int pos = getIteratorPos(buffer->backingBuffer->buffer, it);
 	return getLine(buffer, pos);
+}
+
+internal Location locationFromIterator(TextBuffer *buffer, MGB_Iterator it)
+{
+	int pos = getIteratorPos(buffer->backingBuffer->buffer, it);
+	int line = getLine(buffer, pos);
+	int line_start = getLineStart(buffer->backingBuffer, line);
+	return{line, pos-line_start};
 }
 
 internal int getLineFromCaret(TextBuffer *buffer, int caretId)
@@ -1715,7 +1758,8 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	textBuffer.ownedCarets_id = DHDS_constructDA(int,20, allocator);
 	textBuffer.ownedSelection_id = DHDS_constructDA(int,20, allocator);
 	textBuffer.cursorInfo = DHDS_constructDA(CursorInfo,20, allocator);
-	textBuffer.contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook,20, allocator);
+	textBuffer.contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook, 20, allocator);
+	textBuffer.renderingModifiers= DHDS_constructDA(RenderingModifier,20, allocator);
 	textBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
 	textBuffer.rendering_changes = DHDS_ORD_constructDA(CharRenderingChange, 20, allocator);
 
@@ -1987,40 +2031,7 @@ internal inline __m128i div255(__m128i x)
 }
 
 
-// compared to memset (which can't to 4 byte elements obviously)
-// about to 2x faster at 100 elements on my machene
-// about equal att 300
-// down to .6x at 1000 elements
 
-internal void memset_32(int *dst, int value, int number_of_values)
-{
-	__m128i sse_value = _mm_set1_epi32(value);
-	__m128i write_all = _mm_set1_epi8(0xff);
-	__m128i count_down = _mm_set_epi32(3, 2, 1, 0);
-
-	for (; number_of_values >= 16; number_of_values -= 16, dst += 16)
-	{
-		_mm_prefetch((char *)dst, _MM_HINT_NTA);
-		_mm_storeu_si128((__m128i *)dst, sse_value);
-		_mm_storeu_si128((__m128i *)(dst + 4), sse_value);
-		_mm_storeu_si128((__m128i *)(dst + 8), sse_value);
-		_mm_storeu_si128((__m128i *)(dst + 12), sse_value);
-	}
-	for (; number_of_values > 3; number_of_values -= 4, dst += 4)
-	{
-		_mm_storeu_si128((__m128i *)dst, sse_value);
-	}
-
-	switch (number_of_values)
-	{
-	case 3:
-		dst[2] = value;
-	case 2:
-		dst[1] = value;
-	case 1:
-		dst[0] = value;
-	}
-}
 
 uint64_t get_clock_cycle()
 {
@@ -2383,12 +2394,17 @@ internal void renderRect(Bitmap bitmap, Rect rect, int color)
 	renderRect(bitmap, rect.x, rect.y, rect.width, rect.height, color);
 }
 
-internal MGB_Iterator getIteratorAtLine(TextBuffer *textBuffer, int line)
+internal MGB_Iterator iteratorFromLine(TextBuffer *textBuffer, int line)
 {
 	int start = getLineStart(textBuffer->backingBuffer, line);
 	return getIterator(textBuffer->backingBuffer->buffer, start);
 }
 
+internal MGB_Iterator iteratorFromLocation(TextBuffer *textBuffer, Location loc)
+{
+	int start = getLineStart(textBuffer->backingBuffer, loc.line);
+	return getIterator(textBuffer->backingBuffer->buffer, start+loc.column);
+}
 
 
 #if 0
@@ -2518,9 +2534,8 @@ typedef void(*LineChangeHook)(TextBuffer *textBuffer, CharRenderingInfo *setting
 */
 internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret)
 {
-	MGB_Iterator it = getIteratorAtLine(textBuffer, startLine);
+	MGB_Iterator it = iteratorFromLine(textBuffer, startLine);
 
-	textBuffer->caretX = -10;
 	int orgX = x;
 	bool ended = false;
 
@@ -2531,6 +2546,7 @@ internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startL
 
 	char32_t last_codepoint = 0;
 	Location current_loc = { startLine,0 };
+	rendering = apply_rendering_changes_at(textBuffer, current_loc, rendering);
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 
 	MGB_Iterator prev_it;
@@ -2594,11 +2610,36 @@ internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startL
 	}
 }
 
+
+internal void mark_selection(TextBuffer *textBuffer)
+{
+	if (has_move_changed(textBuffer->backingBuffer, &mark_selection))
+	{
+		remove_rendering_changes(textBuffer, &mark_selection);
+		for (int i = 0; i < min(textBuffer->ownedCarets_id.length, textBuffer->ownedSelection_id.length);i++)
+		{
+			Location Loc_a = getLocationFromCaret(textBuffer, textBuffer->ownedSelection_id.start[i]);
+			Location Loc_b = getLocationFromCaret(textBuffer, textBuffer->ownedCarets_id.start[i]);
+			int cmp = cmp_Location(&Loc_a, &Loc_b);
+			if (cmp < 0)
+			{
+				change_rendering_highlight_color(textBuffer, Loc_a, Loc_b, active_colorScheme.highlightColor, &mark_selection);
+			}
+			else if (cmp > 0)
+			{
+				change_rendering_highlight_color(textBuffer, Loc_b, Loc_a, active_colorScheme.highlightColor, &mark_selection);
+			}
+		}
+	}
+	
+}
+
+
+
 internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret)
 {
-	MGB_Iterator it = getIteratorAtLine(textBuffer, startLine);
+	MGB_Iterator it = iteratorFromLine(textBuffer, startLine);
 	
-	textBuffer->caretX = -10;
 	int orgX = x;
 	bool ended = false;
 
@@ -2609,6 +2650,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 
 	char32_t last_codepoint=0;
 	Location current_loc = {startLine,0};
+	rendering = apply_rendering_changes_at(textBuffer, current_loc, rendering);
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 
 	bool selection = false;
@@ -2620,7 +2662,6 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 		while (!ended)
 		{
 			bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
-			bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
 
 			char32_t codepoint;
 			MGB_Iterator pit = it;
@@ -2642,10 +2683,6 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				if (last_codepoint != 0){
 					width = getCharacterWidth(textBuffer,prev_it,last_codepoint, codepoint, old_rendering.font, old_rendering.scale);
 				}
-				if (selection)
-				{//lol we're effectively done in the next iteration.. :/
-					renderRect(bitmap, (rendering.x + 2) / 3, rendering.y - rendering.font->ascent*rendering.scale, (width + 2) / 3, old_rendering.font->lineHeight*rendering.scale, (int)active_colorScheme.highlightColor);
-				}
 				rendering.x += width;
 				rendering.y += descent;
 				if(!lineBreak)
@@ -2653,21 +2690,14 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				rendering.y -= descent;
 			}
 			
-			//oh yea! Think about this for a while... (I'm sorry, but I like it)
-			selection = onSelection ^ onCaret ^ selection;
-			
 			if (onCaret)
 			{
 				if (drawCaret)
 					renderCaret(bitmap, rendering.x, rendering.y+descent, rendering.scale, rendering.font,(int) (onCaret ? active_colorScheme.caretLight : active_colorScheme.caretDark));
-				textBuffer->caretX = (rendering.x - orgX);
 			}
 
 			if (lineBreak)
 			{
-				if (codepoint == '\r' &&  *getCharacter(mgb, it) == '\n'){ // \r\n is a single lineending.
-					ended |= !MoveIterator(mgb, &it, 1);
-				}
 				if (rendering.y > bitmap.height) { break; }
 				rendering.y += lineHeightFromLine(textBuffer, ++currentLine);
 				rendering.x = orgX;
@@ -2681,7 +2711,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 		}
 		bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
 		bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
-		if (drawCaret && (onCaret || onSelection)) // final caret.
+		if (drawCaret && onCaret) // final caret.
 		{
 			int width = 0;
 			if (last_codepoint != 0) {
@@ -2689,7 +2719,6 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			}
 			rendering.x += width;
 			renderCaret(bitmap, rendering.x, rendering.y + descent, rendering.scale, rendering.font, (int) (onCaret ? active_colorScheme.caretLight : active_colorScheme.caretDark));
-			textBuffer->caretX = (rendering.x - orgX);
 		}
 	}
 }
@@ -2806,6 +2835,7 @@ inline float abs(float f)
 
 internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,bool drawCaret)
 {
+	//CLEAN ME UP AND CREATE A ANIMATION SYSTEM
 	int visibleLines = calculateVisibleLines(textBuffer, bitmap, textBuffer->lastWindowLineOffset);
 	int line = getLineFromCaret(textBuffer, textBuffer->ownedCarets_id.start[0]);
 	float targetY = clamp(round(textBuffer->lastWindowLineOffset), line - visibleLines+1, line);
@@ -2815,8 +2845,9 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	float speed = 1.5 / LH_q; // *dt ain't right when (int)(winoffset) != (int)(winoffset+dy)... It jumps 
 	float dy = abs(diff) > speed ? diff * speed : diff;
 	
-	int min = -textBuffer->caretX + 40;
-	int max = bitmap.width*3-textBuffer->caretX-x-x-40;  //magic, caret width....
+	int caretX = textBuffer->ownedCarets_id.length > 0 ? getPreferedCaretX(textBuffer, 0) : 0; //@BUGS we should not just take the first index ...
+	int min = -caretX+ 40; 
+	int max = bitmap.width*3-caretX-x-x-40;  //magic, caret width....
 	int targetX;
 
 	if (bitmap.width > -min)
@@ -2837,6 +2868,13 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	textBuffer->lastWindowLineOffset = textBuffer->lastWindowLineOffset + dy;
 	float ddy = fmod(textBuffer->lastWindowLineOffset,1);
 	
+	for (int i = 0; i < textBuffer->renderingModifiers.length; i++)
+	{
+		textBuffer->renderingModifiers.start[i](textBuffer);
+	}
+
+
+
 	renderBackground(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1 - ddy)*	firstLH, drawCaret);
 	renderText(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1-ddy) *	firstLH, drawCaret);
 }
@@ -2852,7 +2890,7 @@ internal void clearBuffer(MultiGapBuffer *buffer)
 
 internal int getIndentLine(TextBuffer buffer, int line)
 {
-	MGB_Iterator it = getIteratorAtLine(&buffer, line);
+	MGB_Iterator it = iteratorFromLine(&buffer, line);
 	int c=0;
 	do
 	{

@@ -17,10 +17,7 @@ MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id)
 	MGB_Iterator it;
 	it.sub_index = 0;
 	it.block_index = index + 1;
-	if (!*getCharacter(buffer, it))
-	{
-		getNext(buffer, &it);
-	}
+	pushValid(buffer, &it);
 	return it;
 }
 
