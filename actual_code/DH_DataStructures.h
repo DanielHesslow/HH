@@ -578,12 +578,12 @@ return false;
 // concept might be generalized if the concept proves to need it.
 // for now the concrete version works.
 
-bool binsumtree_index_from_leef_index(DynamicArray_int *arr, int current_index, int *_out_res_index)
+bool binsumtree_index_from_leaf_index(DynamicArray_int *arr, int current_index, int *_out_res_index)
 {
 	RETURN_SUCCESS_AND_VALUE(current_index < arr->capacity / 2, _out_res_index, current_index + arr->capacity / 2);
 }
 
-bool binsumtree_leef_index_from_index(DynamicArray_int *arr, int current_index, int *_out_res_index)
+bool binsumtree_leaf_index_from_index(DynamicArray_int *arr, int current_index, int *_out_res_index)
 {
 	RETURN_SUCCESS_AND_VALUE(current_index >= arr->capacity / 2, _out_res_index, current_index - arr->capacity / 2);
 }
@@ -637,7 +637,7 @@ void binsumtree_double_size(DynamicArray_int *tree)
 void binsumtree_set_relative(DynamicArray_int *tree, int index, int delta)
 {
 	while (index>=tree->capacity / 2)binsumtree_double_size(tree);
-	if (!binsumtree_index_from_leef_index(tree, index, &index))return;
+	if (!binsumtree_index_from_leaf_index(tree, index, &index))return;
 	tree->start[index] += delta;
 	while (binsumtree_parent(tree, index, &index))
 	{
@@ -649,7 +649,7 @@ void binsumtree_set_relative(DynamicArray_int *tree, int index, int delta)
 void binsumtree_set(DynamicArray_int *tree, int index, int elem)
 {
 	while (index>=tree->capacity / 2)binsumtree_double_size(tree);
-	if (!binsumtree_index_from_leef_index(tree, index, &index))
+	if (!binsumtree_index_from_leaf_index(tree, index, &index))
 	{
 		assert(false);
 		return;
@@ -663,31 +663,31 @@ void binsumtree_set(DynamicArray_int *tree, int index, int elem)
 	binsumtree_recalc_sum(tree);
 }
 
-int binsumtree_left_most_leef(DynamicArray_int *tree, int index)
+int binsumtree_left_most_leaf(DynamicArray_int *tree, int index)
 {
 	for (;;) 
 		if (!binsumtree_left(tree, index, &index))break;
 	return index;
 }
-bool binsumtree_leef_value(DynamicArray_int *tree, int leef_index, int *value)
+bool binsumtree_leaf_value(DynamicArray_int *tree, int leaf_index, int *value)
 {
 	int index;
-	bool success = binsumtree_index_from_leef_index(tree, leef_index, &index);
+	bool success = binsumtree_index_from_leaf_index(tree, leaf_index, &index);
 	RETURN_SUCCESS_AND_VALUE(success, value, tree->start[index]);
 }
 bool binsumtree_search(DynamicArray_int *tree, int elem, int* _out_result_index, int index = 1)
 {
 	if (elem <= 0)
 	{
-		int left_leef_index = binsumtree_left_most_leef(tree, index);
-		binsumtree_leef_index_from_index(tree, left_leef_index, _out_result_index);
+		int left_leaf_index = binsumtree_left_most_leaf(tree, index);
+		binsumtree_leaf_index_from_index(tree, left_leaf_index, _out_result_index);
 		return true;
 	}
 	if (tree->start[index] <= elem) return false;
 	int left_index = 0;
 	if (!binsumtree_left(tree, index, &left_index))
 	{
-		binsumtree_leef_index_from_index(tree, index, _out_result_index);
+		binsumtree_leaf_index_from_index(tree, index, _out_result_index);
 		return true;
 	}
 	if (binsumtree_search(tree, elem, _out_result_index, left_index))
@@ -696,7 +696,7 @@ bool binsumtree_search(DynamicArray_int *tree, int elem, int* _out_result_index,
 	int right_index = 0;
 	if (!binsumtree_right(tree, index, &right_index))
 	{
-		binsumtree_leef_index_from_index(tree, index, _out_result_index);
+		binsumtree_leaf_index_from_index(tree, index, _out_result_index);
 		*_out_result_index = index;
 		return true;
 	}
@@ -708,7 +708,7 @@ bool binsumtree_search(DynamicArray_int *tree, int elem, int* _out_result_index,
 
 int binsumtree_getSumUntil(DynamicArray_int *tree, int index)
 {
-	if (!binsumtree_index_from_leef_index(tree, index, &index))return 0;
+	if (!binsumtree_index_from_leaf_index(tree, index, &index))return 0;
 	
 	int ack = 0;
 	while(index != 1) {
@@ -727,11 +727,11 @@ void binsumtree_maybegrow(DynamicArray_int *tree)
 	if (tree->start[tree->capacity - 2] != 0)binsumtree_double_size(tree);
 }
 
-void binsumtree_insert(DynamicArray_int *tree, int leef_index, int elem)
+void binsumtree_insert(DynamicArray_int *tree, int leaf_index, int elem)
 {
 	binsumtree_maybegrow(tree);
 	int index;
-	if (!binsumtree_index_from_leef_index(tree, leef_index, &index))return;
+	if (!binsumtree_index_from_leaf_index(tree, leaf_index, &index))return;
 	memmove(&tree->start[index + 1], &tree->start[index], (tree->capacity - (index+1))*sizeof(int));
 	tree->start[index] = elem;
 	binsumtree_recalc_sum(tree);
@@ -739,7 +739,7 @@ void binsumtree_insert(DynamicArray_int *tree, int leef_index, int elem)
 
 void binsumtree_remove(DynamicArray_int *tree, int index)
 {
-	if (!binsumtree_index_from_leef_index(tree, index, &index))return;
+	if (!binsumtree_index_from_leaf_index(tree, index, &index))return;
 	memmove(&tree->start[index], &tree->start[index+1], (tree->capacity - (index+1))*sizeof(int));
 	tree->start[tree->capacity - 1] = 0;
 	binsumtree_recalc_sum(tree);

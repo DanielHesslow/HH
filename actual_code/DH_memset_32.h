@@ -17,7 +17,9 @@
 // NOTE: It is optimized on my machene so you may not get the same results
 // all performance test are done by taking about 50 samples and then taking the median. Followed by an avarage of 16 next lengths and allignments
 
-
+// we wan't to opmtize this file even if we're in debug mode, 
+// it takes way to long otherwise
+#pragma optimize("2",on) 
 
 #define DH_MEMSET_IMPLEMENTATION
 #define DH_MEMSET_TEST
@@ -122,5 +124,7 @@ void DH_memset_32(int *dst, int32_t value, int number_of_values)
 	}
 }
 
+//wierd syntax to reset optmization settings
+#pragma optimize("",on)
 #endif
 

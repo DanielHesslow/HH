@@ -52,10 +52,10 @@ void* __cdecl _alloca(_In_ size_t _Size);
 
 #include "Allocation.cpp"
 #include "header.h"
+#include "core_heder.h"
+
 #include "MultiGapBuffer.cpp"
-//#include "Parser.hpp"
 #include "colorScheme.h"
-//#include "lexer.cpp"
 #include "ClipBoard.hpp"
 #include "History.cpp"
 
@@ -688,15 +688,16 @@ internal void updateLineData(TextBuffer *textBuffer)
 	BufferChange entry;
 	while (next_history_change(textBuffer->backingBuffer, &updateLineData, &entry))
 	{
+		assert(entry.location.line >= 0);
 		switch (entry.action)
 		{
 		case buffer_change_add:
 		{
 			if (isLineBreak(entry.character))
 			{
-				int leef_index;
-				if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
-				int length_of_current_line = sum_tree->start[leef_index];
+				int leaf_index;
+				if (!binsumtree_index_from_leaf_index(sum_tree, entry.location.line, &leaf_index))assert(false && "this shouldn't happen...");
+				int length_of_current_line = sum_tree->start[leaf_index];
 				int length_of_new_line = length_of_current_line - entry.location.column;
 				assert(length_of_new_line >= 0);
 				binsumtree_set(sum_tree, entry.location.line, entry.location.column + 1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?) dude fuck \r\n, we don't have it. (removed on open file, (maybe) added on write file)
@@ -711,9 +712,9 @@ internal void updateLineData(TextBuffer *textBuffer)
 		{
 			if (isLineBreak(entry.character))
 			{
-				int leef_index;
-				if (!binsumtree_index_from_leef_index(sum_tree, entry.location.line, &leef_index))assert(false && "this shouldn't happen...");
-				int len = sum_tree->start[leef_index] - 1;
+				int leaf_index;
+				if (!binsumtree_index_from_leaf_index(sum_tree, entry.location.line, &leaf_index))assert(false && "this shouldn't happen...");
+				int len = sum_tree->start[leaf_index] - 1;
 				binsumtree_set_relative(sum_tree, entry.location.line - 1, len);
 				binsumtree_remove(sum_tree, entry.location.line);
 			}
@@ -731,7 +732,7 @@ internal int getLineLength(TextBuffer *textBuffer, int line)
 	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
 	updateLineData(textBuffer);
 	int value;
-	if (!binsumtree_leef_value(sum_tree, line, &value))
+	if (!binsumtree_leaf_value(sum_tree, line, &value))
 	{
 		return -1;
 	}
@@ -740,16 +741,15 @@ internal int getLineLength(TextBuffer *textBuffer, int line)
 
 internal int getLine(TextBuffer *textBuffer, int pos)
 {
-	
 	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
 	updateLineData(textBuffer);
 	int res_index = -1;
 	if (!binsumtree_search(sum_tree, pos, &res_index))
 	{
-		res_index = getLines(textBuffer->backingBuffer)-1;
+		res_index = max(0,getLines(textBuffer->backingBuffer)-1);
 	}
 	int total_lines = getLines(textBuffer->backingBuffer);
-	if (res_index >= total_lines)return total_lines-1;
+	if (res_index >= total_lines)return max((total_lines-1),0);
 	else return res_index;
 }
 
@@ -765,6 +765,7 @@ internal Location getLocation(TextBuffer *buffer, int pos)
 	loc.line = getLine(buffer, pos);
 	int start = getLineStart(buffer->backingBuffer, loc.line);
 	loc.column = pos - start;
+	assert(loc.line >= 0 && loc.column >= 0);
 	return loc;
 }
 
@@ -1843,7 +1844,6 @@ internal TextBuffer openCommanLine()
 // now we're returning garbage... oh here's a pointer to free_d mem
 // do what you will... It's not very good at all..
 
-
 internal TextBuffer openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
 {
 	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
@@ -2149,7 +2149,7 @@ internal void blitChar(CharBitmap from, Bitmap to, int x, int y, int color)
 					__m128i res_b = div255(_mm_add_epi16(_mm_mullo_epi16(color_b, alpha_b), _mm_mullo_epi16(src_b, inv_alpha_b)));
 					__m128i res_a = _mm_set1_epi16(0);
 
-					// unpack (notice empty space between first values, that's to allow for the div in the alpha blend)
+					// unpack (notice leaf space between first values, that's to allow for the div in the alpha blend)
 					// a a a a| g g g g| r r r r| b b b b| -> |argbargb|argbargb| 
 
 					__m128i aglo = _mm_unpacklo_epi16(res_g, res_a);
@@ -2348,21 +2348,54 @@ internal void renderCaret(Bitmap bitmap, int x, int y,float scale,Typeface::Font
 
 //		----	LOGIC
 
-
-internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int color, int x, int y, Typeface::Font *font)
+internal void renderText(Bitmap bitmap, DHSTR_String string, float scale, int color, float perc_x, float perc_y, Typeface::Font *font)
 {
-	char32_t last_codepoint = 0;
-
-	for(int i = 0; i < string.length;)
-	{
-		char32_t codepoint;
-		int read = codepoint_read(&string.start[i], string.length-i, (uint32_t *)&codepoint);
-		if(last_codepoint)
-			x+= getCharacterWidth_std(last_codepoint, codepoint, font, scale);
-		renderCharacter(bitmap, codepoint, x, y, scale, color, font);
-		last_codepoint = codepoint;
-		i += read;
+	int x = 0;
+	int y = 0;
+	int string_width = 0;
+	{ // aquire string width
+		char32_t last_codepoint = 0;
+		for (int i = 0; i < string.length;)
+		{
+			char32_t codepoint;
+			int read = codepoint_read(&string.start[i], string.length - i, (uint32_t *)&codepoint);
+			if (last_codepoint)
+				string_width += getCharacterWidth_std(last_codepoint, codepoint, font, scale);
+			last_codepoint = codepoint;
+			i += read;
+		}
+		if(last_codepoint != 0)
+			string_width += getCharacterWidth_std(last_codepoint, 0, font, scale);
 	}
+	y += font->ascent*scale;
+	int height = bitmap.height - (font->ascent - font->descent)*scale;
+	int width = bitmap.width*3 - string_width;
+	
+	if (width > 0)
+	{
+		y += perc_y *height;
+	}
+	if (width > 0)
+	{
+		x += perc_x *width;
+	}
+	/*
+	*/
+
+	{ // render
+		char32_t last_codepoint = 0;
+		for (int i = 0; i < string.length;)
+		{
+			char32_t codepoint;
+			int read = codepoint_read(&string.start[i], string.length - i, (uint32_t *)&codepoint);
+			if (last_codepoint)
+				x += getCharacterWidth_std(last_codepoint, codepoint, font, scale);
+			renderCharacter(bitmap, codepoint, x, y, scale, color, font);
+			last_codepoint = codepoint;
+			i += read;
+		}
+	}
+	
 }
 
 internal void renderRect(Bitmap bitmap, int xOffset, int yOffset, int width, int height, int color)
@@ -2515,11 +2548,6 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine,in
 }
 #endif
 
-internal void bigTitles(TextBuffer *textBuffer, CharRenderingInfo *settings, int currentLine)
-{
-	settings->scale = scaleFromLine(textBuffer, currentLine);
-}
-typedef void(*LineChangeHook)(TextBuffer *textBuffer, CharRenderingInfo *settings, int currentLine);
 
 
 
@@ -2777,6 +2805,7 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 
 internal void renderCommandLine(Bitmap bitmap, Data data)
 {
+#if 0
 	TextBuffer *buffer = data.commandLine;
 	CharRenderingInfo rendering = renderingStateFromLine(buffer, 0);
 	int LH = rendering.font->lineHeight * rendering.scale;
@@ -2812,6 +2841,23 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 		}
 	}
 	renderText(buffer, subBitmap(bitmap, r), 0, 0, height + dec, true);
+#endif
+
+	TextBuffer *buffer = data.commandLine;
+	CharRenderingInfo rendering = renderingStateFromLine(buffer, 0);
+	int LH = rendering.font->lineHeight * rendering.scale;
+	int padding = 2;
+	int minWidth = 400;
+	int width = bitmap.width / 2;
+	width = width > minWidth ? width : min(minWidth, bitmap.width - padding * 2);
+	int x = (bitmap.width - width) / 2;
+	int y = 0 + padding;
+	Rect r = { x,y,width,bitmap.height};
+
+	int dec = rendering.font->descent* rendering.scale;
+	
+	renderBackground(buffer,bitmap,0,50,0,true);
+	renderText(buffer, subBitmap(bitmap, r), 0, 0, LH, true);
 }
 
 
@@ -2872,8 +2918,6 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	{
 		textBuffer->renderingModifiers.start[i](textBuffer);
 	}
-
-
 
 	renderBackground(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1 - ddy)*	firstLH, drawCaret);
 	renderText(textBuffer, bitmap, textBuffer->lastWindowLineOffset, textBuffer->dx, y + (1-ddy) *	firstLH, drawCaret);
@@ -2979,15 +3023,6 @@ internal void initTextBuffer(TextBuffer *textBuffer)
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
 	_setLocalBindings(textBuffer);
-	Color f = rgb(.5, .5, .8);
-	Color s = rgb(.3, .8, .3);
-	Typeface::Font *fnt = getFont(DHSTR_MAKE_STRING("Arial Italic"));
-
-	change_rendering_color(textBuffer, { 10, 0 }, {10,10}, { 1, .8f, .5f, .8f },  0);
-	change_rendering_highlight_color(textBuffer, { 10, 0 }, { 10,10 }, f, 0);
-	change_rendering_scale(textBuffer, { 10, 0 } ,{10,10}, textBuffer->initial_rendering_state.scale * 5, 0);
-	change_rendering_font(textBuffer,				{ 10, 0 }, { 10, 10},fnt, 0);
-	change_rendering_highlight_color(textBuffer, { 10, 3 }, { 10, 20 }, s,  0);
 }
 
 internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
@@ -3017,7 +3052,7 @@ internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int 
 	// bad, these allocations are completely unnessesary.. (and the only two we do every frame)
 	DHSTR_String allocationInfo = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING(string), buffer->fileName);
 	
-	renderText(bitmap, allocationInfo, scale, (int)active_colorScheme.foregroundColor, x, y, buffer->initial_rendering_state.font);
+	renderText(bitmap, allocationInfo, scale, (int)active_colorScheme.foregroundColor, 0.5f, 0, buffer->initial_rendering_state.font);
 	//the filename looks freed to me... :/
 }
 
@@ -3455,23 +3490,35 @@ internal Bitmap layout(Bitmap bitmap,int length, int index)
 	return subBitmap;
 }
 
+
+global_variable Data *global_data;
+
+void render_and_advance(Bitmap bitmap, char **ptr)
+{
+	int index = (TextBuffer *)*ptr - global_data->textBuffers.start;
+	renderScreen((TextBuffer *)*ptr, bitmap, 5, 0, index == global_data->activeTextBufferIndex, true);
+	*ptr +=sizeof(TextBuffer);
+	{//draw the index 
+		char buffer[50];
+		sprintf(buffer, "%d", index+1);
+		Typeface::Font *f = getFont(DHSTR_MAKE_STRING("Times New Roman"));
+		float scale = 0.02f;
+		renderText(bitmap, DHSTR_MAKE_STRING(buffer), scale, (int)active_colorScheme.active_color, 1, 0, f);
+	}
+}
+Layout *leaf = (Layout *)0;
 internal void renderFrame(Data data, Bitmap bitmap, uint64_t microsStart)
 {
+	global_data = &data;
 	local_persist bool wasCommandLineActive = false;
 	if (data.updateAllBuffers || wasCommandLineActive||true)
 	{
-		for (int i = 0; i < data.textBuffers.length; i++)
-		{
-			Bitmap subBitmap = layout(bitmap, data.textBuffers.length, i);
-			renderScreen(&data.textBuffers.start[i], subBitmap, 5, 0, i==data.activeTextBufferIndex,true);
-		}
-		if (data.textBuffers.length == 0)
-		{
-			renderBackground(bitmap);
-		}
+		char *ptr = (char *)data.textBuffers.start;
+		char *end = (char *)&data.textBuffers.start[data.textBuffers.length];
+		renderWithLayout(bitmap, data.layout, &ptr,end, render_and_advance);
+
 		if(data.isCommandlineActive)
 			renderCommandLine(bitmap, data);
-		
 	}
 	else
 	{
@@ -3494,5 +3541,9 @@ internal void renderFrame(Data data, Bitmap bitmap, uint64_t microsStart)
 	wasCommandLineActive= data.isCommandlineActive;
 }
 
+
+
+
+#include "Layout.cpp"
 
 

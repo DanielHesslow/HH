@@ -61,6 +61,7 @@ struct Bitmap
 	int stride;
 	int bytesPerPixel;
 };
+#include "Layout.h"
 
 
 #define DHEN_NAME InputType
@@ -518,6 +519,7 @@ struct Data
 	DynamicArray_MenuItem menu;
 	int activeMenuItem;
 	bool eatNext;
+	Layout *layout;
 };
 
 

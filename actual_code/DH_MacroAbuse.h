@@ -27,12 +27,7 @@
 // --- DEBUG STUFF---
 
 #undef assert
-#ifdef DEBUG 
-#define assert(cond) do { if (!(cond)) {MessageBox(NULL, #cond,  "assert failed", MB_OK | MB_ICONEXCLAMATION);  __debugbreak();} } while(0)
-#else
-// @test me tomorrow
-#define assert(cond) do { if (!(cond)) {MessageBox(NULL, DHMA_STRING(cond) "\n" DHMA_STRING_(__LINE__) ", " __FILE__ ,  "assert failed"  , MB_OK | MB_ICONEXCLAMATION); ExitProcess(-1);} } while(0)
-#endif
+#define assert(cond) do { if(!(cond)){if(MessageBox(NULL, DHMA_STRING(cond) "\n" DHMA_STRING_(__LINE__) ", " __FILE__ ,  "assert failed"  , MB_OKCANCEL)!=IDOK)ExitProcess(0); if (IsDebuggerPresent())__debugbreak();}}while(0)
 
 char OutputDebugString_buffer[1000];
 #define dpr(integer)\
@@ -48,8 +43,7 @@ sprintf(OutputDebugString_buffer, DHMA_STRING(f) ": %f (" DHMA_STRING_(__LINE__)
 OutputDebugString(OutputDebugString_buffer);
 
 
-
-
+#define ForPrevI(arr, type, length, before_zero) for(int i = 0, type prev = before_zero; prev = arr[i],i<length;i++) 
 
 
 //--- NUMBER_OF_ARGS()

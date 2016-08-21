@@ -1,43 +1,57 @@
 #include "header.h"
 internal void addDirFilesToMenu(Data *data, DHSTR_String string, DHSTR_String  *name); //more platform, must be refactored to win32 
 
-	/* //how the api for the msging should work.
-	while (Message msg = peek_msg(&textBuffer->backingBuffer, &elasticTab))
-	{
-	switch msg.type{
-	case append:
-	case remove:
-	if (msg.line < currentLine) memo.length = 0;
-	break;
-	}
-	}
-	mark_all_msgs_read(&textBuffer->backingBuffer, &elasticTab);
-	*/
+#define USE_API
+
+#ifdef USE_API
+#include "api.h"
+API api;
+#endif
 
 internal void showCommandLine(Data *data)
 {
+#ifndef USE_API
 	data->isCommandlineActive = true;
+#else
+	api.commandLine.open();
+#endif 
 }
 
 internal void hideCommandLine(Data *data)
 {
+#ifndef USE_API
 	data->isCommandlineActive = false;
+#else
+	api.commandLine.close();
+#endif 
 }
 
 internal void feedCommandLine(Data *data, DHSTR_String string)
 {
+#ifndef USE_API
 	for (int i = 0; i < string.length; i++)
 	{
 		appendCharacter(data->commandLine,string.start[i],0,true);
 	}
+#else
+	api.commandLine.feed(string.start, string.length);
+#endif
 }
 
 internal void preFeedCommandLine(Data *data, char *string, int length)
 {
+#ifndef USE_API
 	showCommandLine(data);
 	clearBuffer(data->commandLine->backingBuffer->buffer);
 	feedCommandLine(data, DHSTR_MAKE_STRING(string));
+#else
+	api.commandLine.open();
+	api.commandLine.clear();
+	api.commandLine.feed(string, length);
+#endif
 }
+
+// ---- BACKEND API 
 
 void memory_for_last_event() {}
 
@@ -226,8 +240,12 @@ internal void executeBindingFunction(KeyBinding binding, TextBuffer *buffer,Data
 	else assert(false);
 }
 
+// --- END BACKEND_API
+
+
 void _moveLeft(TextBuffer *textBuffer, Mods mods)
 {
+#ifndef USE_API
 	if (mods & mod_control)
 	{
 		moveWhile(textBuffer, mods & mod_shift ? do_select:no_select, do_log, true, dir_left, &whileWord);
@@ -237,29 +255,45 @@ void _moveLeft(TextBuffer *textBuffer, Mods mods)
 		move(textBuffer, dir_left, do_log, mods & mod_shift ? do_select:no_select);
 	}
 	checkIdsExist(textBuffer);
+#else
+	void *handle = api.handles.getActiveViewHandle();
+	if (mods & mod_control) api.cursor.moveWhile(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, &whileWord);
+	else api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_grapheme_cluster);
+#endif
 }
 
 void _moveRight(TextBuffer *textBuffer, Mods mods)
 {
+#ifndef USE_API
 	if (mods & mod_control)
 	{
 		moveWhile(textBuffer, mods & mod_shift ? do_select : no_select, do_log, true, dir_right, &whileWord);
 	}
 	else
 	{
-		move(textBuffer, dir_right, do_log, mods & mod_shift?do_select:no_select);
+		move(textBuffer, dir_right, do_log, mods & mod_shift ? do_select : no_select);
 	}
 	checkIdsExist(textBuffer);
+#else 
+	void *handle = api.handles.getActiveViewHandle();
+	if (mods & mod_control) api.cursor.moveWhile(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, &whileWord);
+	else api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_grapheme_cluster);
+#endif
 }
 
 void _moveUp(TextBuffer *textBuffer, Mods mods)
 {
+#ifndef USE_API
 	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
 	{
 		moveV_nc(textBuffer, mods & mod_shift ? do_select: no_select, i,true);
 	}
 	removeOwnedEmptyCarets(textBuffer);
 	checkIdsExist(textBuffer);
+#else
+	void *handle = api.handles.getActiveViewHandle();
+	api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_line);
+#endif
 }
 
 void _moveUpPage(TextBuffer *textBuffer, Mods mods)
@@ -273,16 +307,23 @@ void _moveDownPage(TextBuffer *textBuffer, Mods mods)
 
 void _moveDown(TextBuffer *textBuffer, Mods mods)
 {
+#ifndef USE_API
 	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
 	{
 		moveV_nc(textBuffer, mods & mod_shift? do_select :no_select, i,false);
 	}
 	removeOwnedEmptyCarets(textBuffer);
 	checkIdsExist(textBuffer);
+#else
+	void *handle = api.handles.getActiveViewHandle();
+	api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_line);
+#endif
+
 }
  
 void _backSpace(TextBuffer *textBuffer,Mods mods)
 {
+#ifndef USE_API
 	if (validSelection(textBuffer))
 	{
 		removeSelection(textBuffer);
@@ -294,10 +335,30 @@ void _backSpace(TextBuffer *textBuffer,Mods mods)
 		else
 			removeCharacter(textBuffer,true);
 	}
+#else
+	void *handle = api.handles.getActiveViewHandle();
+	int number_of_cursors = api.cursor.number_of_cursors(handle);
+	for (int i = 0; i < number_of_cursors;i++)
+	{
+		if (api.cursor.selection_length(handle,i))
+		{
+			api.cursor.delete_selected(handle,i);
+		}
+		else
+		{
+			if (mods & mod_control)
+				api.cursor.removeWhile(handle, -1, i, &whileWord);
+			else
+				api.cursor.remove_codepoint(handle, i, -1);
+
+		}
+	}
+#endif
 }
 
 void _delete(TextBuffer *textBuffer, Mods mods)
 {
+#ifndef USE_API
 	if (validSelection(textBuffer))
 	{
 		removeSelection(textBuffer);
@@ -309,43 +370,27 @@ void _delete(TextBuffer *textBuffer, Mods mods)
 		else
 			deleteCharacter(textBuffer, true);
 	}
-}
-
-internal void toggle(TextBuffer *buffer, BufferType type)
-{
-	if (buffer->bufferType == regularBuffer)
+#else
+	void *handle = api.handles.getActiveViewHandle();
+	int number_of_cursors = api.cursor.number_of_cursors(handle);
+	for (int i = 0; i < number_of_cursors; i++)
 	{
-		buffer->bufferType = type;
-	}
-	else
-	{
-		buffer->bufferType = regularBuffer;
-	}
-
-}
-/*
-internal int levDist(char *string, char *alternative)
-{
-	//callibrate and handle offsets (ie.) abcd should closer to bcd than it is to ape
-	const int DIFF = 10;
-	const int LEN = 1;
-
-	int dist = 0;
-	while (*string && *alternative)
-	{
-		if (*string != *alternative)
+		if (api.cursor.selection_length(handle,i))
 		{
-			dist += DIFF;
+			api.cursor.delete_selected(handle, i);
 		}
-		++string;
-		++alternative;
+		else
+		{
+			if (mods & mod_control)
+				api.cursor.removeWhile(handle, -1, i, &whileWord);
+			else
+				api.cursor.remove_codepoint(handle, i,1);
+		}
 	}
-	dist += max(DHSTR_strlen(string) - DHSTR_strlen(alternative), 0)*LEN;
-	return dist;
-	}
-*/
-/*
-*/
+#endif
+}
+
+
 internal int levDist(DHSTR_String string, DHSTR_String alternative)
 {
 	//callibrate and handle offsets (ie.) abcd should closer to bcd than it is to ape
@@ -489,19 +534,80 @@ internal void charDownFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 	maxOrderSortedMenu(data,10); //calibrate this
 }
 
+
+
+int diffIndexMove(Layout *root, int active_index, int dir, LayoutType type)
+{
+	int ack = 0;
+	if (!dir)return 0;
+	if (dir > 0)
+	{ // move right / down / forward
+		LayoutLocator locator = locateLayout(root, active_index);
+		if (!locator.parent)return 0;
+		do
+		{
+			if (locator.child_index < locator.parent->number_of_children-1 && locator.parent->type == type)
+			{
+				Layout *target_layout = locator.parent->children[locator.child_index + 1];
+				ack += favourite_descendant(target_layout);
+				locator.parent->favourite_child = locator.child_index + 1;
+				return ack+1;
+			}
+			for (int i = locator.child_index + 1; i < locator.parent->number_of_children; i++)
+			{
+				ack += number_of_leafs(locator.parent->children[i]);
+			}
+		} while (parentLayout(root, locator, &locator));
+	}
+	else
+	{ //move left / up / back
+		LayoutLocator locator = locateLayout(root, active_index);
+		if (!locator.parent)return 0;
+		do
+		{
+			if (locator.child_index > 0 && locator.parent->type == type)
+			{
+				Layout *target_layout = locator.parent->children[locator.child_index - 1];
+				ack += number_of_leafs(target_layout);
+				ack = -ack;
+				ack += favourite_descendant(target_layout);
+				locator.parent->favourite_child = locator.child_index - 1;
+				return ack;
+			}
+			for (int i = 0; i < locator.child_index; i++)
+			{
+				ack += number_of_leafs(locator.parent->children[i]);
+			}
+		} while (parentLayout(root, locator, &locator));
+	}
+	return 0;
+}
+
+internal int clamp_text_buffer_index(Data *data, int index)
+{
+	return(clamp(index, 0, min(number_of_leafs(data->layout), max(data->textBuffers.length - 1, 0))));
+}
+
 internal void moveActiveBufferLeft(Data *data)
 {
-	--data->activeTextBufferIndex;
-	data->activeTextBufferIndex = clamp(data->activeTextBufferIndex, 0, max(data->textBuffers.length - 1, 0));
-	data->updateAllBuffers = true;
+	data->activeTextBufferIndex += diffIndexMove(data->layout, data->activeTextBufferIndex, -1, layout_type_x);
 }
 
 internal void moveActiveBufferRight(Data *data)
 {
-	++data->activeTextBufferIndex;
-	data->activeTextBufferIndex = clamp(data->activeTextBufferIndex, 0, max(data->textBuffers.length - 1, 0));
-	data->updateAllBuffers = true;
+	data->activeTextBufferIndex += diffIndexMove(data->layout, data->activeTextBufferIndex, 1, layout_type_x);
 }
+
+internal void moveActiveBufferUp(Data *data)
+{
+	data->activeTextBufferIndex += diffIndexMove(data->layout, data->activeTextBufferIndex, -1, layout_type_y);
+}
+
+internal void moveActiveBufferDown(Data *data)
+{
+	data->activeTextBufferIndex += diffIndexMove(data->layout, data->activeTextBufferIndex, 1, layout_type_y);
+}
+
 
 internal void moveDownMenu(Data *data)
 {
@@ -563,7 +669,6 @@ internal void removeAllButOneCaret(TextBuffer *buffer)
 		removeCaret(buffer, 1, true);
 	}
 }
-
 
 internal void win32_runBuild(Data *data) //this is *highly* platform dependant. Should be moved to win32.cpp
 {	//and refactor out the openfile into buffeer into its own win32 function.
@@ -683,7 +788,6 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 	{
 		filePath = DHSTR_CPY(restOfTheBuffer, allocator); //this wasn't copied before. surely it should be
 	}
-
 	bool success;
 	TextBuffer textBuffer = openFileIntoNewBuffer(filePath, &success);
 	if (success)
@@ -691,6 +795,25 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 		Add(&data->textBuffers, textBuffer);
 		data->activeTextBufferIndex = data->textBuffers.length - 1;
 		hideCommandLine(data);
+
+#if 0
+		// null pointers below because it's a vararg and passing 0 instead of (void *) 0 only works if (void *) is one word 
+		switch (data->textBuffers.length)
+		{
+		case 1:
+			data->layout = 0;
+			break;
+		case 2:
+			data->layout = CREATE_LAYOUT(layout_type_x, 2, nullptr, 0.5, nullptr);
+			break;
+		case 3:
+			data->layout = CREATE_LAYOUT(layout_type_y, 1, nullptr, 0.5, nullptr, 0.75, nullptr);
+			break;
+		case 4:
+			data->layout = CREATE_LAYOUT(layout_type_x, 5, nullptr, 0.25, CREATE_LAYOUT(layout_type_y,2,nullptr,0.33,nullptr,0.67,nullptr));
+			break;
+		}
+#endif
 	}
 	else
 	{
@@ -700,6 +823,7 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 
 void find_mark_down(Data *data, DHSTR_String restOfTheBuffer)
 {
+#ifndef USE_API
 	TextBuffer *buffer = &data->textBuffers.start[data->activeTextBufferIndex];
 	remove_rendering_changes(buffer, find_mark_down);
 
@@ -735,12 +859,55 @@ void find_mark_down(Data *data, DHSTR_String restOfTheBuffer)
 		}
 	}
 	while (getNext(mgb, &it));
+#else
+	void *view_handle = api.handles.getActiveBufferHandle();
+	api.markup.remove(view_handle, &find_mark_down);
+	if (text_length == 0)return;
+	
+	
+	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
+	MGB_Iterator it_cpy;
+	MGB_Iterator it = getIterator(mgb);
+	if (!pushValid(mgb, &it))return;
 
+	void *buffer_handle = api.handles.getBufferHandleFromViewHandle(view_handle);
+	Iterator it = api.text_iterator.make(buffer_handle);
+	Location match_location;
+	int i = 0;
+	char b;
+	while (api.text_iterator.nextByte(it, &b, false))
+	{
+		if (b == text[i])
+		{
+			if (i == 0)
+			{
+				match_location = api.Location.from_iterator(buffer, it);
+			}
+
+			if (++i == text_length)
+			{
+				it_cpy = it;
+				api.text_iterator.nextCodepoint(mgb, &it_cpy);
+				api.markup.highlight_color(view_handle, &find_mark_down, match_location, api.Location.from_iterator(buffer, it_cpy), active_colorScheme.active_color);
+				i = 0;
+			}
+		}
+		else
+		{
+			i = 0;
+		}
+	}
+
+#endif
 }
 void find(Data *data, DHSTR_String restOfTheBuffer)
 {
+#ifndef USE_API
 	TextBuffer *buffer = &data->textBuffers.start[data->activeTextBufferIndex];
 	remove_rendering_changes(buffer, find_mark_down);
+#else
+	api.markup.remove(api.handles.getActiveBufferHandle(), find_mark_down);
+#endif
 }
 
 bool splitPath(DHSTR_String path, DHSTR_String *_out_directory, DHSTR_String *_out_file)
@@ -806,14 +973,22 @@ internal void addDirFilesToMenu(Data *data, DHSTR_String path, DHSTR_String *_ou
 }
 void _cloneBuffer(Data *data)
 {
+#ifndef USE_API
 	TextBuffer *clonee = &data->textBuffers.start[data->activeTextBufferIndex];
 	TextBuffer b = cloneTextBuffer(clonee);
 	Add(&data->textBuffers, b);
+#else
+	api.view.clone_view(api.handles.getActiveViewHandle());
+#endif
 }
 
 internal void appendVerticalTab(TextBuffer *textBuffer)
 {
+#ifndef USE_API
 	appendCharacter(textBuffer, u'\v');
+#else
+	api.cursor.append_codepoint(api.handles.getActiveViewHandle, ALL_CURSORS, -1, "\v");
+#endif
 }
 
 
@@ -832,6 +1007,7 @@ DEFINE_HashTable(int, float, silly_hash, int_eq);
 
 internal bool is_big_title(TextBuffer *textBuffer, int line)
 {
+#ifndef USE_API
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 	MGB_Iterator it = iteratorFromLine(textBuffer, line);
 	int ack = 0;
@@ -855,6 +1031,9 @@ internal bool is_big_title(TextBuffer *textBuffer, int line)
 		}
 	} while (getNext(mgb, &it));
 	return false;
+#else
+	api.text_iterator.make_from_location(api.handles.getActiveBufferHandle, );
+#endif
 }
 internal void init_big_titles(TextBuffer *buffer, HashTable_int_float *memo)
 {
@@ -875,8 +1054,8 @@ internal void mark_bigTitles(TextBuffer *buffer)
 
 	float title_size = buffer->initial_rendering_state.scale * 2;
 
-	remove_rendering_changes(buffer, &bigTitles);
-	BindingIdentifier ident = { 0,&bigTitles };
+	remove_rendering_changes(buffer, &mark_bigTitles);
+	BindingIdentifier ident = { 0,&mark_bigTitles };
 	
 	void **memoPtr;
 	HashTable_int_float *memo;
@@ -932,8 +1111,9 @@ internal void mark_bigTitles(TextBuffer *buffer)
 			}
 		}
 	}
-
 }
+
+
 internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char, Typeface::Font *typeface, float scale)
 {
 	int tab_width= getCharacterWidth_std('\t', ' ', typeface, 1);
@@ -945,7 +1125,7 @@ internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_ch
 	HashTable_Location_int *memo;
 	if (!lookup(&buffer->backingBuffer->bindingMemory, ident, &memoPtr))
 	{
-		memo = (HashTable_Location_int *) alloc_(sizeof(HashTable_Location_int), "ElasticTab hashtable struct");
+		memo = (HashTable_Location_int *) alloc_(sizeof(HashTable_Location_int), "ElasticTab hashtable struct"); //why are we leaking?
 		*memo = DHDS_constructHT(Location,int,50,buffer->allocator); 
 		insert(&buffer->backingBuffer->bindingMemory,ident,memo);
 	}
@@ -1038,10 +1218,18 @@ next:
 		}
 	}
 end:
-	//out commented because of bug mentioned above.
 	int ret = max_w - our_w;
 	insert(memo, loc, ret);
 	return ret;
+}
+
+
+internal void setActive(Data *data, int index)
+{
+	if (data->textBuffers.length > index && index >= 0)
+	{
+		data->activeTextBufferIndex = index;
+	}
 }
 
 internal void setBindingsLocal(TextBuffer *textBuffer)
@@ -1071,7 +1259,6 @@ internal void setBindingsLocal(TextBuffer *textBuffer)
 		bindKey('Z', precisely,  mod_control, undoMany);
 		bindKey('Z', precisely,  mod_control | mod_shift, redoMany);
 		bindKey('W', precisely, mod_control, closeTextBuffer);
-		bindKey('M', precisely, mod_control, [](TextBuffer *buffer) {toggle(buffer, HistoryBuffer); });
 		//bindKey('P', precisely, mod_control, freeBufferedCharacters);
 		bindKey(VK_UP, precisely, mod_control, insertCaretAbove);
 		bindKey( VK_DOWN, precisely, mod_control, insertCaretBelow);
@@ -1097,10 +1284,22 @@ internal void setBindingsLocal(TextBuffer *textBuffer)
 		bindCommand("find",  find, find_mark_down);
 	}
 
-	bindKey(VK_LEFT, precisely, mod_alt, moveActiveBufferLeft);
+	bindKey(VK_LEFT, precisely, mod_alt,  moveActiveBufferLeft);
 	bindKey(VK_RIGHT, precisely, mod_alt, moveActiveBufferRight);
-	bindKey(VK_DOWN, precisely, mod_alt, showCommandLine);
-	bindKey(VK_UP, precisely, mod_alt, hideCommandLine);
+	bindKey(VK_UP, precisely, mod_alt,  moveActiveBufferUp);
+	bindKey(VK_DOWN, precisely, mod_alt, moveActiveBufferDown);
+	
+	bindKey('1', precisely, mod_alt, [](Data *data) {setActive(data, 0);});
+	bindKey('2', precisely, mod_alt, [](Data *data) {setActive(data, 1); });
+	bindKey('3', precisely, mod_alt, [](Data *data) {setActive(data, 2); });
+	bindKey('4', precisely, mod_alt, [](Data *data) {setActive(data, 3); });
+	bindKey('5', precisely, mod_alt, [](Data *data) {setActive(data, 4); });
+	bindKey('6', precisely, mod_alt, [](Data *data) {setActive(data, 5); });
+	bindKey('7', precisely, mod_alt, [](Data *data) {setActive(data, 6); });
+	bindKey('8', precisely, mod_alt, [](Data *data) {setActive(data, 6); });
+	bindKey('9', precisely, mod_alt, [](Data *data) {setActive(data, 7); });
+	bindKey('0', precisely, mod_alt, [](Data *data) {setActive(data, 9); });
+
 	bindKey('O', precisely, mod_control, preFeedOpenFile);
 	bindKey('B',precisely, mod_control, win32_runBuild);
 	bindKey('N', precisely, mod_control, preFeedCreateFile);

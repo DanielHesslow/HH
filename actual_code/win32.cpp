@@ -457,6 +457,7 @@ WinMain(HINSTANCE instance,
 		LPSTR args,
 		int showCode)
 {
+	test();
 	if (GetCaretBlinkTime() == INFINITE)			
 	{
 		blinkTimePerS = 0;
@@ -483,11 +484,19 @@ WinMain(HINSTANCE instance,
 	windowClass.lpszClassName = "TEWindowClass";
 	
 	RegisterClass(&windowClass);
+#if 1
 	HWND window = CreateWindowEx(
-		0,	windowClass.lpszClassName,
+		WS_EX_STATICEDGE,	windowClass.lpszClassName,
 		"+T", WS_OVERLAPPEDWINDOW|WS_VISIBLE,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 		0, 0, instance, 0);
+#else
+	HWND window = CreateWindowEx(
+		0, windowClass.lpszClassName,
+		"+T", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+		0, 0, instance, 0);
+#endif
 
 	win32WindowDimensions dims = getWindowDimensions(window);
 	win32ResizeDIBSection(&bitmap,dims.width,dims.height);
@@ -510,10 +519,13 @@ WinMain(HINSTANCE instance,
 	data.commandLine = buffer;
 	data.activeTextBufferIndex = 0;
 	data.menu = DHDS_constructDA(MenuItem, 50,default_allocator);
+	Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
+	Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
+
+	data.layout = CREATE_LAYOUT(layout_type_y, 2, split_a, .5, split_b);
 	uint16_t timeSinceStartUpInMs;
 		
 	//test_binsumtree_();
-
 	if (window)
 	{
 
