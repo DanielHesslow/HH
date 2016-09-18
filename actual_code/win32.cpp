@@ -486,7 +486,7 @@ WinMain(HINSTANCE instance,
 	RegisterClass(&windowClass);
 #if 1
 	HWND window = CreateWindowEx(
-		WS_EX_STATICEDGE,	windowClass.lpszClassName,
+		0,	windowClass.lpszClassName,
 		"+T", WS_OVERLAPPEDWINDOW|WS_VISIBLE,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 		0, 0, instance, 0);

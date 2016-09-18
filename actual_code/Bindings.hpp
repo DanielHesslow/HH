@@ -8,58 +8,72 @@ internal void addDirFilesToMenu(Data *data, DHSTR_String string, DHSTR_String  *
 API api;
 #endif
 
+#ifndef USE_API
 internal void showCommandLine(Data *data)
 {
-#ifndef USE_API
 	data->isCommandlineActive = true;
-#else
-	api.commandLine.open();
-#endif 
 }
-
-internal void hideCommandLine(Data *data)
+#else
+internal void showCommandLine()
 {
-#ifndef USE_API
-	data->isCommandlineActive = false;
-#else
-	api.commandLine.close();
-#endif 
+	api.commandLine.open();
 }
+#endif 
+#ifndef USE_API
+#else
+internal void hideCommandLine()
+{
+	api.commandLine.close();
+}
+#endif
 
+#ifndef USE_API
 internal void feedCommandLine(Data *data, DHSTR_String string)
 {
-#ifndef USE_API
 	for (int i = 0; i < string.length; i++)
 	{
 		appendCharacter(data->commandLine,string.start[i],0,true);
 	}
-#else
-	api.commandLine.feed(string.start, string.length);
-#endif
 }
-
+#else
+internal void feedCommandLine(DHSTR_String string)
+{
+	api.commandLine.feed(string.start, string.length);
+}
+#endif
+#ifndef USE_API
 internal void preFeedCommandLine(Data *data, char *string, int length)
 {
-#ifndef USE_API
 	showCommandLine(data);
 	clearBuffer(data->commandLine->backingBuffer->buffer);
 	feedCommandLine(data, DHSTR_MAKE_STRING(string));
+
+}
 #else
+internal void preFeedCommandLine(char *string, int length)
+{
 	api.commandLine.open();
 	api.commandLine.clear();
 	api.commandLine.feed(string, length);
-#endif
 }
-
+#endif
 // ---- BACKEND API 
 
 void memory_for_last_event() {}
 
+#ifndef USE_API
 internal void preFeedOpenFile(Data *data)
 {
 	char buffer[] = u8"openFile ";
 	preFeedCommandLine(data, buffer, sizeof(buffer) / sizeof(buffer[0]));
 }
+#else
+internal void preFeedOpenFile()
+{
+	char buffer[] = u8"openFile ";
+	preFeedCommandLine(buffer, sizeof(buffer) / sizeof(buffer[0]));
+}
+#endif
 
 internal void freeMenuItems(Data *data)
 {
@@ -79,20 +93,6 @@ struct CommandInfo
 	void(*charDown)(Data *data, DHSTR_String restOfTheBuffer);
 };
 
-//---textBuffer events
-
-enum BufferEventType
-{
-	buffer_event_remove,
-	buffer_event_append,
-};
-struct BufferEvent
-{
-	BufferEventType type;
-	int line;
-	int column;
-
-};
 
 struct MenuData
 {
@@ -154,19 +154,19 @@ internal void executeCommand(Data *data)
 	MultiGapBuffer *buffer = data->commandLine->backingBuffer->buffer;
 
 	bool success;
-	CommandInfo command = findMatchingCommand(buffer,commands,&success);
+	CommandInfo command = findMatchingCommand(buffer, commands, &success);
 	if (!success)
 	{
 		freeMenuItems(data);
 		return;
 	}
-	
-	MGB_Iterator rest = getIterator(buffer,DHSTR_strlen(command.name));
+
+	MGB_Iterator rest = getIterator(buffer, DHSTR_strlen(command.name));
 
 	int ignore;
 	stripInitialWhite(buffer, &rest, &ignore);
-	char *remainingString = getRestAsString(buffer,rest);
-	if(command.func)
+	char *remainingString = getRestAsString(buffer, rest);
+	if (command.func)
 		command.func(data, DHSTR_MAKE_STRING(remainingString));
 
 	free_(remainingString);
@@ -243,9 +243,9 @@ internal void executeBindingFunction(KeyBinding binding, TextBuffer *buffer,Data
 // --- END BACKEND_API
 
 
+#ifndef USE_API
 void _moveLeft(TextBuffer *textBuffer, Mods mods)
 {
-#ifndef USE_API
 	if (mods & mod_control)
 	{
 		moveWhile(textBuffer, mods & mod_shift ? do_select:no_select, do_log, true, dir_left, &whileWord);
@@ -255,16 +255,19 @@ void _moveLeft(TextBuffer *textBuffer, Mods mods)
 		move(textBuffer, dir_left, do_log, mods & mod_shift ? do_select:no_select);
 	}
 	checkIdsExist(textBuffer);
+}
 #else
+void _moveLeft(Mods mods) //probably just allow the user to request this?
+{
 	void *handle = api.handles.getActiveViewHandle();
 	if (mods & mod_control) api.cursor.moveWhile(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, &whileWord);
 	else api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_grapheme_cluster);
-#endif
 }
+#endif
 
+#ifndef USE_API
 void _moveRight(TextBuffer *textBuffer, Mods mods)
 {
-#ifndef USE_API
 	if (mods & mod_control)
 	{
 		moveWhile(textBuffer, mods & mod_shift ? do_select : no_select, do_log, true, dir_right, &whileWord);
@@ -274,28 +277,34 @@ void _moveRight(TextBuffer *textBuffer, Mods mods)
 		move(textBuffer, dir_right, do_log, mods & mod_shift ? do_select : no_select);
 	}
 	checkIdsExist(textBuffer);
+}
 #else 
+void _moveRight(Mods mods)
+{
 	void *handle = api.handles.getActiveViewHandle();
 	if (mods & mod_control) api.cursor.moveWhile(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, &whileWord);
 	else api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_grapheme_cluster);
-#endif
 }
-
+#endif
+#ifndef USE_API
 void _moveUp(TextBuffer *textBuffer, Mods mods)
 {
-#ifndef USE_API
 	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
 	{
 		moveV_nc(textBuffer, mods & mod_shift ? do_select: no_select, i,true);
 	}
 	removeOwnedEmptyCarets(textBuffer);
 	checkIdsExist(textBuffer);
+}
 #else
+void _moveUp(Mods mods)
+{
 	void *handle = api.handles.getActiveViewHandle();
 	api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_line);
-#endif
 }
+#endif
 
+#if 0
 void _moveUpPage(TextBuffer *textBuffer, Mods mods)
 {
 	movePage(textBuffer, true);
@@ -304,26 +313,29 @@ void _moveDownPage(TextBuffer *textBuffer, Mods mods)
 {
 	movePage(textBuffer, false);
 }
-
+#endif
+#ifndef USE_API
 void _moveDown(TextBuffer *textBuffer, Mods mods)
 {
-#ifndef USE_API
 	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
 	{
 		moveV_nc(textBuffer, mods & mod_shift? do_select :no_select, i,false);
 	}
 	removeOwnedEmptyCarets(textBuffer);
 	checkIdsExist(textBuffer);
-#else
-	void *handle = api.handles.getActiveViewHandle();
-	api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_line);
-#endif
 
 }
- 
+#else
+void _moveDown(Mods mods)
+{
+	void *handle = api.handles.getActiveViewHandle();
+	api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_line);
+}
+#endif
+
+#ifndef USE_API
 void _backSpace(TextBuffer *textBuffer,Mods mods)
 {
-#ifndef USE_API
 	if (validSelection(textBuffer))
 	{
 		removeSelection(textBuffer);
@@ -335,14 +347,17 @@ void _backSpace(TextBuffer *textBuffer,Mods mods)
 		else
 			removeCharacter(textBuffer,true);
 	}
+}
 #else
+void _backSpace(Mods mods)
+{
 	void *handle = api.handles.getActiveViewHandle();
 	int number_of_cursors = api.cursor.number_of_cursors(handle);
-	for (int i = 0; i < number_of_cursors;i++)
+	for (int i = 0; i < number_of_cursors; i++)
 	{
-		if (api.cursor.selection_length(handle,i))
+		if (api.cursor.selection_length(handle, i))
 		{
-			api.cursor.delete_selected(handle,i);
+			api.cursor.delete_selected(handle, i);
 		}
 		else
 		{
@@ -353,12 +368,12 @@ void _backSpace(TextBuffer *textBuffer,Mods mods)
 
 		}
 	}
-#endif
 }
+#endif
 
+#ifndef USE_API
 void _delete(TextBuffer *textBuffer, Mods mods)
 {
-#ifndef USE_API
 	if (validSelection(textBuffer))
 	{
 		removeSelection(textBuffer);
@@ -370,12 +385,16 @@ void _delete(TextBuffer *textBuffer, Mods mods)
 		else
 			deleteCharacter(textBuffer, true);
 	}
+
+}
 #else
+void _delete(Mods mods)
+{
 	void *handle = api.handles.getActiveViewHandle();
 	int number_of_cursors = api.cursor.number_of_cursors(handle);
 	for (int i = 0; i < number_of_cursors; i++)
 	{
-		if (api.cursor.selection_length(handle,i))
+		if (api.cursor.selection_length(handle, i))
 		{
 			api.cursor.delete_selected(handle, i);
 		}
@@ -384,12 +403,11 @@ void _delete(TextBuffer *textBuffer, Mods mods)
 			if (mods & mod_control)
 				api.cursor.removeWhile(handle, -1, i, &whileWord);
 			else
-				api.cursor.remove_codepoint(handle, i,1);
+				api.cursor.remove_codepoint(handle, i, 1);
 		}
 	}
-#endif
 }
-
+#endif
 
 internal int levDist(DHSTR_String string, DHSTR_String alternative)
 {
@@ -583,6 +601,7 @@ int diffIndexMove(Layout *root, int active_index, int dir, LayoutType type)
 	return 0;
 }
 
+#ifndef USE_API
 internal int clamp_text_buffer_index(Data *data, int index)
 {
 	return(clamp(index, 0, min(number_of_leafs(data->layout), max(data->textBuffers.length - 1, 0))));
@@ -620,18 +639,26 @@ internal void moveUpMenu(Data *data)
 	--data->activeMenuItem;
 	data->activeMenuItem = clamp(data->activeMenuItem, 0, max(data->menu.length, 0));
 }
-
+#endif
 internal void CloseCommandLine(Data *data)
 {
 	clearBuffer(data->commandLine->backingBuffer->buffer);
 	data->isCommandlineActive = false;
 }
 
+#ifndef USE_API
 internal void preFeedCreateFile(Data *data)
 {
 	char buffer[] = u8"createFile ";
 	preFeedCommandLine(data, buffer, sizeof(buffer) / sizeof(buffer[0]));
 }
+#else
+internal void preFeedCreateFile()
+{
+	char buffer[] = u8"createFile ";
+	preFeedCommandLine(buffer, sizeof(buffer) / sizeof(buffer[0]));
+}
+#endif
 enum Dir
 {
 	above,
@@ -738,6 +765,7 @@ internal void win32_runBuild(Data *data) //this is *highly* platform dependant. 
 	CloseHandle(writePipe);
 }
 
+#ifndef USE_API
 internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 {
 	void *(*allocator)(int size) = [](int bytes) {return alloc_(bytes, "openFileCommand"); };
@@ -796,7 +824,7 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 		data->activeTextBufferIndex = data->textBuffers.length - 1;
 		hideCommandLine(data);
 
-#if 0
+#if 1
 		// null pointers below because it's a vararg and passing 0 instead of (void *) 0 only works if (void *) is one word 
 		switch (data->textBuffers.length)
 		{
@@ -820,10 +848,16 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 		free_(filePath.start);
 	}
 }
+#else
+internal void openFileCommand(char *start, int length)
+{
+	
+}
+#endif
 
+#ifndef USE_API
 void find_mark_down(Data *data, DHSTR_String restOfTheBuffer)
 {
-#ifndef USE_API
 	TextBuffer *buffer = &data->textBuffers.start[data->activeTextBufferIndex];
 	remove_rendering_changes(buffer, find_mark_down);
 
@@ -859,36 +893,34 @@ void find_mark_down(Data *data, DHSTR_String restOfTheBuffer)
 		}
 	}
 	while (getNext(mgb, &it));
+}
 #else
-	void *view_handle = api.handles.getActiveBufferHandle();
-	api.markup.remove(view_handle, &find_mark_down);
-	if (text_length == 0)return;
-	
-	
-	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
-	MGB_Iterator it_cpy;
-	MGB_Iterator it = getIterator(mgb);
-	if (!pushValid(mgb, &it))return;
+void find_mark_down(char *text, int text_length)
+{
+	void *view_handle = api.handles.getActiveViewHandle();
 
-	void *buffer_handle = api.handles.getBufferHandleFromViewHandle(view_handle);
-	Iterator it = api.text_iterator.make(buffer_handle);
+	api.markup.remove(view_handle, &find_mark_down);
+	if (text_length == 0) return;
+
+	BufferHandle buffer_handle = api.handles.getBufferHandleFromViewHandle(view_handle);
+	TextIterator it = api.text_iterator.make(buffer_handle);
 	Location match_location;
 	int i = 0;
 	char b;
-	while (api.text_iterator.nextByte(it, &b, false))
+	while (api.text_iterator.nextByte(&it, &b, false))
 	{
 		if (b == text[i])
 		{
 			if (i == 0)
 			{
-				match_location = api.Location.from_iterator(buffer, it);
+				match_location = api.Location.from_iterator(buffer_handle, it);
 			}
 
 			if (++i == text_length)
 			{
-				it_cpy = it;
-				api.text_iterator.nextCodepoint(mgb, &it_cpy);
-				api.markup.highlight_color(view_handle, &find_mark_down, match_location, api.Location.from_iterator(buffer, it_cpy), active_colorScheme.active_color);
+				TextIterator it_cpy = it;
+				api.text_iterator.nextCodepoint(&it_cpy, 0, false);
+				api.markup.highlight_color(view_handle, &find_mark_down, match_location, api.Location.from_iterator(buffer_handle, it_cpy), active_colorScheme.active_color);
 				i = 0;
 			}
 		}
@@ -897,18 +929,21 @@ void find_mark_down(Data *data, DHSTR_String restOfTheBuffer)
 			i = 0;
 		}
 	}
-
-#endif
 }
+#endif
+
+#ifndef USE_API
 void find(Data *data, DHSTR_String restOfTheBuffer)
 {
-#ifndef USE_API
 	TextBuffer *buffer = &data->textBuffers.start[data->activeTextBufferIndex];
 	remove_rendering_changes(buffer, find_mark_down);
-#else
-	api.markup.remove(api.handles.getActiveBufferHandle(), find_mark_down);
-#endif
 }
+#else
+void find(char *start, int length)
+{
+	api.markup.remove(api.handles.getActiveBufferHandle(), find_mark_down);
+}
+#endif
 
 bool splitPath(DHSTR_String path, DHSTR_String *_out_directory, DHSTR_String *_out_file)
 {
@@ -982,14 +1017,17 @@ void _cloneBuffer(Data *data)
 #endif
 }
 
+#ifndef USE_API
 internal void appendVerticalTab(TextBuffer *textBuffer)
 {
-#ifndef USE_API
 	appendCharacter(textBuffer, u'\v');
-#else
-	api.cursor.append_codepoint(api.handles.getActiveViewHandle, ALL_CURSORS, -1, "\v");
-#endif
 }
+#else
+internal void appendVerticalTab()
+{
+	api.cursor.append_codepoint(api.handles.getActiveViewHandle(), ALL_CURSORS, -1, '\v');
+}
+#endif
 
 
 unsigned int hash_loc(Location loc)
@@ -1001,13 +1039,17 @@ unsigned int locator_equality(Location a, Location b)
 	return a.line == b.line && a.column == b.column;
 }
 
+
+
 DEFINE_HashTable(Location, int, hash_loc, locator_equality);
 DEFINE_HashTable(int, float, silly_hash, int_eq);
+bool bool_eq(bool a, bool b) { return a == b; }
+DEFINE_HashTable(int, bool, silly_hash, bool_eq);
 
 
+#ifndef USE_API
 internal bool is_big_title(TextBuffer *textBuffer, int line)
 {
-#ifndef USE_API
 	MultiGapBuffer *mgb = textBuffer->backingBuffer->buffer;
 	MGB_Iterator it = iteratorFromLine(textBuffer, line);
 	int ack = 0;
@@ -1031,12 +1073,27 @@ internal bool is_big_title(TextBuffer *textBuffer, int line)
 		}
 	} while (getNext(mgb, &it));
 	return false;
-#else
-	api.text_iterator.make_from_location(api.handles.getActiveBufferHandle, );
-#endif
+
 }
+#else
+internal bool is_big_title(void *buffer_handle, int line)
+{
+	TextIterator it = api.text_iterator.make_from_location(buffer_handle, { line,0 });
+	char b;
+	int ack = 0;
+	while (api.text_iterator.nextByte(&it, &b, false))
+	{
+		if (b == '\n') break;
+		else if (b == '-') { if (++ack >= 3) return true; }
+		else ack = 0;
+	}
+	return false;
+}
+#endif
+#ifndef USE_API
 internal void init_big_titles(TextBuffer *buffer, HashTable_int_float *memo)
 {
+
 	float title_size = buffer->initial_rendering_state.scale * 2;
 	clear(memo);
 	for (int i = 0; i < getLines(buffer->backingBuffer); i++)
@@ -1047,7 +1104,21 @@ internal void init_big_titles(TextBuffer *buffer, HashTable_int_float *memo)
 		}
 	}
 }
+#else
+internal void init_big_titles(void *buffer_handle, HashTable_int_bool *memo)
+{
+	clear(memo);
+	for (int i = 0; i < api.buffer.numLines(buffer_handle); i++)
+	{
+		if (is_big_title(buffer_handle, i))
+		{
+			insert(memo, i, true);
+		}
+	}
+}
+#endif
 
+#ifndef USE_API
 internal void mark_bigTitles(TextBuffer *buffer)
 {
 	bool changed = false;
@@ -1059,13 +1130,13 @@ internal void mark_bigTitles(TextBuffer *buffer)
 	
 	void **memoPtr;
 	HashTable_int_float *memo;
-	if (!lookup(&buffer->backingBuffer->bindingMemory, ident, &memoPtr))
+	if (!lookup(&buffer->backingBuffer->commonBuffer.bindingMemory, ident, &memoPtr))
 	{
 		memo = (HashTable_int_float *)alloc_(sizeof(HashTable_int_float), "bigTitles hashtable struct");
 		*memo = DHDS_constructHT(int, float, 50, buffer->allocator);
 		changed = true;
 		init_big_titles(buffer, memo);
-		insert(&buffer->backingBuffer->bindingMemory, ident, memo);
+		insert(&buffer->backingBuffer->commonBuffer.bindingMemory, ident, memo);
 	}
 	else
 	{
@@ -1112,10 +1183,80 @@ internal void mark_bigTitles(TextBuffer *buffer)
 		}
 	}
 }
+#else
+internal void mark_bigTitles()
+{
+	bool changed = false;
+
+	HashTable_int_bool *memo = (HashTable_int_bool *)api.memory.getFunctionInfo(api.handles.getActiveBufferHandle(), &mark_bigTitles);
+
+	void *buffer_handle = api.handles.getActiveBufferHandle();
+	DH_Allocator allocator;
+	allocator.alloc = [](size_t bytes_to_alloc, void  *info, void *data) {return api.memory.allocateMemory(data, bytes_to_alloc); };
+	allocator.free = [](void *mem, void *data) {api.memory.deallocateMemory(data, mem); };
+	allocator.data = buffer_handle;
+
+	void *mem = api.memory.getFunctionInfo(buffer_handle, &mark_bigTitles);
+	if (!mem)
+	{
+		memo = (HashTable_int_bool *)api.memory.allocateMemory(buffer_handle, sizeof(HashTable_int_float));
+		*memo = DHDS_constructHT(int, bool, 50, allocator);
+		changed = true;
+		init_big_titles(buffer_handle, memo);
+	}
+	BufferChange event;
+	while (api.changes.next_change(buffer_handle, &mark_bigTitles, &event))
+	{
+		changed = true;
+		api.changes.mark_all_read(buffer_handle, &mark_bigTitles);
+
+		if (is_big_title(buffer_handle, event.location.line))
+			insert(memo, event.location.line, true);
+		else
+			remove(memo, event.location.line, 0);
+
+		//lazy af way to handle linebreak lol
+		if (is_big_title(buffer_handle, event.location.line - 1))
+			insert(memo, event.location.line - 1, true);
+		else
+			remove(memo, event.location.line - 1, 0);
+
+
+		if (is_big_title(buffer_handle, event.location.line + 1))
+			insert(memo, event.location.line + 1, true);
+		else
+			remove(memo, event.location.line + 1, 0);
+	}
+
+	if (changed)
+	{
+		void *view_handle;
+		ViewIterator vi = api.buffer.view_iterator(api.handles.getActiveBufferHandle());
+		ViewIterator vi_cpy = vi;
+		while (api.buffer.next(&vi_cpy, &view_handle))
+		{
+			float title_size = api.markup.get_initial_rendering_state(view_handle).scale;
+			api.markup.remove(view_handle, &mark_bigTitles);
+
+			for (int i = 0; i < memo->capacity; i++)
+			{
+
+				if (memo->buckets[i].state == bucket_state_occupied)
+				{
+					int line = memo->buckets[i].key;
+					api.markup.scale(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, title_size);
+					api.markup.text_color(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, active_colorScheme.active_color);
+				}
+			}
+		}
+	}
+}
+#endif
 
 
 internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_char, char32_t next_char, Typeface::Font *typeface, float scale)
 {
+#ifndef USE_API
 	int tab_width= getCharacterWidth_std('\t', ' ', typeface, 1);
 
 	//@BUG: we do not account for difference in tab width from different font scales.
@@ -1123,11 +1264,11 @@ internal int elasticTab(TextBuffer *buffer, MGB_Iterator it, char32_t current_ch
 	BindingIdentifier ident = { 0,&elasticTab };
 	void **memoPtr;
 	HashTable_Location_int *memo;
-	if (!lookup(&buffer->backingBuffer->bindingMemory, ident, &memoPtr))
+	if (!lookup(&buffer->backingBuffer->commonBuffer.bindingMemory, ident, &memoPtr))
 	{
 		memo = (HashTable_Location_int *) alloc_(sizeof(HashTable_Location_int), "ElasticTab hashtable struct"); //why are we leaking?
 		*memo = DHDS_constructHT(Location,int,50,buffer->allocator); 
-		insert(&buffer->backingBuffer->bindingMemory,ident,memo);
+		insert(&buffer->backingBuffer->commonBuffer.bindingMemory,ident,memo);
 	}
 	else
 	{
@@ -1221,6 +1362,8 @@ end:
 	int ret = max_w - our_w;
 	insert(memo, loc, ret);
 	return ret;
+#else
+#endif
 }
 
 
@@ -1232,6 +1375,8 @@ internal void setActive(Data *data, int index)
 	}
 }
 
+
+#ifndef USE_API
 internal void setBindingsLocal(TextBuffer *textBuffer)
 {
 	Add(&textBuffer->renderingModifiers, &mark_selection);
@@ -1263,8 +1408,8 @@ internal void setBindingsLocal(TextBuffer *textBuffer)
 		bindKey(VK_UP, precisely, mod_control, insertCaretAbove);
 		bindKey( VK_DOWN, precisely, mod_control, insertCaretBelow);
 		bindKey('C', precisely, mod_alt, _cloneBuffer);
-		bindKey(VK_PRIOR, precisely, mod_none, _moveUpPage);
-		bindKey(VK_NEXT, precisely, mod_none, _moveDownPage);
+		//bindKey(VK_PRIOR, precisely, mod_none, _moveUpPage);
+		//bindKey(VK_NEXT, precisely, mod_none, _moveDownPage);
 		bindKey( VK_ESCAPE, precisely, mod_none, removeAllButOneCaret);
 		bindKey('\t', precisely, mod_control, appendVerticalTab);
 	} 
@@ -1304,6 +1449,65 @@ internal void setBindingsLocal(TextBuffer *textBuffer)
 	bindKey('B',precisely, mod_control, win32_runBuild);
 	bindKey('N', precisely, mod_control, preFeedCreateFile);
 }
+#else 
+internal void setBindingsLocal(void *view_handle)
+{
+	api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_selection);
+	api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_bigTitles);
+	api.callbacks.bindKey_mods(view_handle, VK_LEFT, atMost, mod_control | mod_shift, _moveLeft);
+	api.callbacks.bindKey_mods(view_handle, VK_RIGHT, atMost, mod_control | mod_shift, _moveRight);
+	api.callbacks.bindKey_mods(view_handle, VK_BACK, atMost, mod_control, _backSpace);
+	api.callbacks.bindKey_mods(view_handle, VK_DELETE, atMost, mod_control, _delete);
+
+	api.callbacks.bindKey(view_handle, 'C', precisely, mod_control, []() {api.clipboard.copy(api.handles.getActiveViewHandle()); });
+	api.callbacks.bindKey(view_handle, 'X', precisely, mod_control, []() {api.clipboard.cut(api.handles.getActiveViewHandle()); });
+	api.callbacks.bindKey(view_handle, 'V', precisely, mod_control, []() {api.clipboard.paste(api.handles.getActiveViewHandle()); });
+
+	if (api.view.get_type(view_handle) == (int)buffer_mode_defualt)
+	{
+#if 0
+		ContextCharWidthHook elasticTabHook;
+		elasticTabHook.character = '\v';
+		elasticTabHook.func = elasticTab;
+
+		Add(&textBuffer->contextCharWidthHook, elasticTabHook);
+#endif
+		api.callbacks.bindKey_mods(view_handle, VK_UP, atMost, mod_shift, _moveUp);
+		api.callbacks.bindKey_mods(view_handle, VK_DOWN, atMost, mod_shift, _moveDown);
+		api.callbacks.bindKey(view_handle, 'S', precisely, mod_control, []() {api.buffer.save(api.handles.getActiveBufferHandle());});
+		//api.callbacks.bindKey(view_handle, 'Z', precisely, mod_control, undoMany);
+		//api.callbacks.bindKey(view_handle, 'Z', precisely, mod_control | mod_shift, redoMany);
+		api.callbacks.bindKey(view_handle, 'W', precisely, mod_control, [](){api.view.clone_view(api.handles.getActiveViewHandle());});
+		//api.callbacks.bindKey(view_handle, VK_UP, precisely, mod_control, insertCaretAbove);
+		//api.callbacks.bindKey(view_handle, VK_DOWN, precisely, mod_control, insertCaretBelow);
+		api.callbacks.bindKey(view_handle, 'C', precisely, mod_alt, []() {api.view.clone_view(api.handles.getActiveViewHandle()); });
+		//api.callbacks.bindKey(view_handle, VK_PRIOR, precisely, mod_none, _moveUpPage);
+		//api.callbacks.bindKey(view_handle, VK_NEXT, precisely, mod_none, _moveDownPage);
+		//api.callbacks.bindKey(view_handle, VK_ESCAPE, precisely, mod_none, removeAllButOneCaret);
+		api.callbacks.bindKey(view_handle, '\t', precisely, mod_control, appendVerticalTab);
+	}
+
+	else if (api.view.get_type(view_handle) == (int)buffer_mode_commandline)
+	{
+		api.callbacks.bindKey(view_handle, VK_RETURN, atLeast, mod_none, api.commandLine.executeCommand);
+		//api.callbacks.bindKey(view_handle, VK_DOWN, precisely, mod_none, moveDownMenu);
+		//api.callbacks.bindKey(view_handle, VK_UP, precisely, mod_none, moveUpMenu);
+		api.callbacks.bindKey(view_handle, VK_ESCAPE, precisely, mod_none, hideCommandLine);
+
+		api.callbacks.bindCommand(view_handle, "openFile", openFileCommand, 0,0);
+		api.callbacks.bindCommand(view_handle, "o", openFileCommand, 0,0);
+		api.callbacks.bindCommand(view_handle, "createFile", api.view.createFromFile ,0,0);
+		api.callbacks.bindCommand(view_handle, "closeBuffer", [](char *start, int length) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
+		api.callbacks.bindCommand(view_handle, "c", [](char *start, int length) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
+		api.callbacks.bindCommand(view_handle, "find", find, find_mark_down,0);
+	}
+
+	api.callbacks.bindKey(view_handle, 'O', precisely, mod_control, preFeedOpenFile);
+	//api.callbacks.bindKey(view_handle, 'B', precisely, mod_control, win32_runBuild);
+	api.callbacks.bindKey(view_handle, 'N', precisely, mod_control, preFeedCreateFile);
+}
+
+#endif
 
 void _setLocalBindings(TextBuffer *textBuffer)
 {

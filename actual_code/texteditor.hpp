@@ -1535,7 +1535,7 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 	history.events = ORD_constructDynamicArray_HistoryEventMarker(initialHistoryEntrySize, "history event markers", allocator);
 	buffer->history = history;
 	buffer->buffer = stringBuffer;
-	buffer->bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
+	buffer->commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
 	buffer->binding_next_change = DHDS_constructHT(PVOID, HistoryChangeTracker, 20, allocator);
 	buffer->ref_count = 0;
 	initLineSumTree(buffer, allocator);
@@ -1761,7 +1761,7 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	textBuffer.cursorInfo = DHDS_constructDA(CursorInfo,20, allocator);
 	textBuffer.contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook, 20, allocator);
 	textBuffer.renderingModifiers= DHDS_constructDA(RenderingModifier,20, allocator);
-	textBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
+	textBuffer.commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
 	textBuffer.rendering_changes = DHDS_ORD_constructDA(CharRenderingChange, 20, allocator);
 
 	return textBuffer;
@@ -1892,7 +1892,11 @@ internal void saveFile(TextBuffer *textBuffer)
 	if(textBuffer->fileName.start)
 		saveFile_PLATFORM(textBuffer->backingBuffer->buffer, textBuffer->fileName);
 }
-internal void hideCommandLine(Data *data);
+internal void hideCommandLine(Data *data)
+{
+	data->isCommandlineActive = false;
+}
+
 
 internal void createFile(Data *data, DHSTR_String name)
 {
@@ -2019,19 +2023,14 @@ __m128i SSE_8 = _mm_set1_epi16(8);
 __m128i SSE_00ff = _mm_set1_epi16(0xff00);
 __m128i SSE_ff00 = _mm_set1_epi16(0x00ff);
 
-internal inline __m128i div255(__m128i x)
+internal DHMA_FORCE_INLINE __m128i div255(__m128i x)
 {
-
 	//#define div255(x) ((x+1+((x+1)>>8))>>8)
   	x = _mm_add_epi16(x, SSE_1); // inc x
 	__m128i x_shift = _mm_srli_epi16(x, 8);
 	x = _mm_srli_epi16(_mm_add_epi16(x, x_shift), 8); // x= ((x >> 8) + x) >> 8
-
 	return x;
 }
-
-
-
 
 uint64_t get_clock_cycle()
 {
@@ -2947,7 +2946,7 @@ internal int getIndentLine(TextBuffer buffer, int line)
 void _moveUp(TextBuffer *textBuffer, Mods mods);
 void _moveDown(TextBuffer *textBuffer, Mods mods);
 
-
+#if 0
 internal void movePage(TextBuffer *textBuffer, bool up)
 {
 	int h = 760; //heh
@@ -2977,6 +2976,7 @@ internal void movePage(TextBuffer *textBuffer, bool up)
 		for (int i = 0; i < c; i++) _moveDown(textBuffer, (Mods)0);
 	}
 }
+#endif
 
 internal int getNextTokenHash(MultiGapBuffer *buffer, MGB_Iterator *it, int *counter)
 {
@@ -3491,7 +3491,7 @@ internal Bitmap layout(Bitmap bitmap,int length, int index)
 }
 
 
-global_variable Data *global_data;
+//global_variable Data *global_data;
 
 void render_and_advance(Bitmap bitmap, char **ptr)
 {

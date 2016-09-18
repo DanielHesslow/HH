@@ -29,12 +29,7 @@ struct Data;
 // it's the result that is important.
 // appending enter should also add an even marker... Never remove more than a line of text in one undo.
 
-struct Location
-{
-	int line;
-	int column;
-};
-
+#include "core_heder.h"
 
 struct Rect
 {
@@ -233,14 +228,18 @@ struct HistoryChangeTracker
 DEFINE_HashTable(BindingIdentifier, PVOID, silly_bind_ident_hash, bind_ident_eq)
 DEFINE_HashTable(PVOID, HistoryChangeTracker, silly_hash_void_ptr, ptr_eq)
 
+struct CommonBuffer
+{
+	HashTable_BindingIdentifier_PVOID bindingMemory;
+};
 
 struct BackingBuffer
 {
+	CommonBuffer commonBuffer;
 	MultiGapBuffer *buffer;
 	History history;
 	DynamicArray_int lineSumTree;
 	int lines;
-	HashTable_BindingIdentifier_PVOID bindingMemory;
 	HashTable_PVOID_HistoryChangeTracker binding_next_change;
 	uint64_t ref_count;
 	DHSTR_String path; 
@@ -451,10 +450,12 @@ struct CharRenderingInfo
 	Typeface::Font *font;
 };
 
+
 typedef void(*RenderingModifier)(TextBuffer *textBuffer);
 DEFINE_DynamicArray(RenderingModifier);
 struct TextBuffer
 {
+	CommonBuffer commonBuffer;
 	BufferType bufferType;
 	BackingBuffer *backingBuffer;
 	DynamicArray_RenderingModifier renderingModifiers;
@@ -469,7 +470,6 @@ struct TextBuffer
 	DynamicArray_int ownedSelection_id;
 	DynamicArray_CursorInfo cursorInfo;
 	DynamicArray_ContextCharWidthHook contextCharWidthHook;
-	HashTable_BindingIdentifier_PVOID bindingMemory;
 	ORD_DynamicArray_CharRenderingChange rendering_changes;
 	DH_Allocator allocator;
 	CharRenderingInfo initial_rendering_state;

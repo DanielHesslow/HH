@@ -19,14 +19,25 @@ set hasrun="yes"
 
 set buildmode=.%1
 
-echo buildmode
 
 pushd ..\..\build
 
 set flags=-Z7 -Femain.exe ..\HH\actual_code\win32.cpp user32.lib gdi32.lib
+
+:Loop
+SHIFT
+IF "%1"=="" GOTO Continue
+	set flags=%flags% -D%1
+SHIFT
+GOTO Loop
+:Continue
+ 
+echo flags: %flags%
+
+
 if %buildmode%==.r (
 	ctime.exe -begin timings_release.ctm
-	cl -O2 -DRELEASE %flags%
+	cl -O2i -DRELEASE %flags%
 ) else (
 	ctime.exe -begin timings_debug.ctm
 	cl -Od -DDEBUG %flags%

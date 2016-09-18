@@ -5,6 +5,14 @@
 
 #define DHMA_SWAP(type, a, b)do{type tmp = a; a = b; b = tmp;}while(0)
 
+#ifdef _MSC_VER
+#define DHMA_FORCE_INLINE __forceinline
+#elif defined __llvm__
+#define DHMA_FORCE_INLINE __attribute__((always_inline))
+#elif defined __GNUC__
+#define DHMA_FORCE_INLINE __attribute__((always_inline))
+#endif
+
 
 #define DHMA_STRING(s) #s
 #define DHMA_STRING_(value) DHMA_STRING(value)
