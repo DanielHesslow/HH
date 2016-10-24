@@ -5,7 +5,7 @@ internal void addDirFilesToMenu(Data *data, DHSTR_String string, DHSTR_String  *
 
 #ifdef USE_API
 #include "api.h"
-API api;
+API api = getAPI();
 #endif
 
 #ifndef USE_API
@@ -38,7 +38,7 @@ internal void feedCommandLine(Data *data, DHSTR_String string)
 #else
 internal void feedCommandLine(DHSTR_String string)
 {
-	api.commandLine.feed(string.start, string.length);
+	api.commandLine.feed(string.start, string.length-1);
 }
 #endif
 #ifndef USE_API
@@ -71,176 +71,10 @@ internal void preFeedOpenFile(Data *data)
 internal void preFeedOpenFile()
 {
 	char buffer[] = u8"openFile ";
-	preFeedCommandLine(buffer, sizeof(buffer) / sizeof(buffer[0]));
+	preFeedCommandLine(buffer, (sizeof(buffer) / sizeof(buffer[0])-1));
 }
 #endif
 
-internal void freeMenuItems(Data *data)
-{
-	for (int i = 0; i < data->menu.length; i++)
-	{
-		free_(data->menu.start[i].name.start);
-		free_(data->menu.start[i].data);
-	}
-	data->menu.length = 0;
-}
-
-struct CommandInfo
-{
-	char *name;
-	int hashedName;
-	void(*func)(Data *data, DHSTR_String restOfTheBuffer);
-	void(*charDown)(Data *data, DHSTR_String restOfTheBuffer);
-};
-
-
-struct MenuData
-{
-	bool isFile;
-};
-DEFINE_DynamicArray(CommandInfo)
-DynamicArray_CommandInfo commands = constructDynamicArray_CommandInfo(100,"commandBindings");
-
-internal CommandInfo findMatchingCommand(MultiGapBuffer *buffer, DynamicArray_CommandInfo commands, bool *success)
-{
-	CommandInfo allocationInfo = {};
-	MGB_Iterator it = getIterator(buffer);
-	
-	int ignore;
-	
-	int hash = getNextTokenHash(buffer,&it,&ignore);
-	for(int i = 0; i<commands.length;i++)
-	{
-		if(commands.start[i].hashedName == hash)//make sure the string is the same as well!
-		{
-			allocationInfo = commands.start[i];
-			*success = true;
-			return allocationInfo;
-		}
-	}
-	*success = false;
-	return allocationInfo;
-}
-
-
-// these two functions is the same. (one token diff)
-// merge them? @cleanup
-internal void keyDown_CommandLine(Data *data)
-{
-	MultiGapBuffer *buffer = data->commandLine->backingBuffer->buffer;
-	
-	bool success;
-	CommandInfo command = findMatchingCommand(buffer,commands,&success);
-	if (!success)
-	{
-		freeMenuItems(data);
-		return;
-	}
-	
-	MGB_Iterator rest = getIterator(buffer,DHSTR_strlen(command.name));
-
-	int ignore;
-	stripInitialWhite(buffer, &rest, &ignore);
-	char *remainingString = getRestAsString(buffer,rest);
-	if(command.charDown)
-		command.charDown(data, DHSTR_MAKE_STRING(remainingString));
-	free_(remainingString);
-}
-
-internal void executeCommand(Data *data)
-{
-	data->eatNext = true;
-
-	MultiGapBuffer *buffer = data->commandLine->backingBuffer->buffer;
-
-	bool success;
-	CommandInfo command = findMatchingCommand(buffer, commands, &success);
-	if (!success)
-	{
-		freeMenuItems(data);
-		return;
-	}
-
-	MGB_Iterator rest = getIterator(buffer, DHSTR_strlen(command.name));
-
-	int ignore;
-	stripInitialWhite(buffer, &rest, &ignore);
-	char *remainingString = getRestAsString(buffer, rest);
-	if (command.func)
-		command.func(data, DHSTR_MAKE_STRING(remainingString));
-
-	free_(remainingString);
-	data->updateAllBuffers = true;
-}
-
-bool matchMods(Mods mods, Mods filter, ModMode mode)
-{
-	if (mode == atMost)
-	{
-		return !(mods & ~filter);
-	}
-	else if (mode == atLeast)
-	{
-		return (mods & filter) == filter;
-	}
-	else if (mode == precisely)
-	{
-		return (mods == filter);
-	}else assert(false);
-	return false;
-}
-
-global_variable DynamicArray_KeyBinding *bindings = (DynamicArray_KeyBinding *)0;
-
-KeyBinding bindKeyBase(char VK_Code, ModMode modMode, Mods mods, void *func)
-{
-	KeyBinding binding = {};
-	binding.VK_Code = VK_Code;
-	binding.mods = mods;
-	binding.funcP= func;
-	binding.modMode = modMode;
-	return binding;
-}
-
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(TextBuffer *buffer))
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_TextBuffer;
-	Add(bindings, binding);
-}
-
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(TextBuffer *buffer, Mods mods))
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_TextBuffer_Mods;
-	Add(bindings, binding);
-}
-
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(Data *data))
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_Data;
-	Add(bindings, binding);
-}
-
-internal void executeBindingFunction(KeyBinding binding, TextBuffer *buffer,Data *data, Mods currentMods)
-{
-	if (binding.funcType == Arg_TextBuffer_Mods)
-	{
-		binding.func_TextBuffer_Mods(buffer, currentMods);
-	}
-	else if(binding.funcType == Arg_TextBuffer)
-	{
-		binding.func_TextBuffer(buffer);
-	}
-	else if (binding.funcType == Arg_Data)
-	{
-		binding.func_Data(data);
-	}
-	else assert(false);
-}
-
-// --- END BACKEND_API
 
 
 #ifndef USE_API
@@ -259,7 +93,7 @@ void _moveLeft(TextBuffer *textBuffer, Mods mods)
 #else
 void _moveLeft(Mods mods) //probably just allow the user to request this?
 {
-	void *handle = api.handles.getActiveViewHandle();
+	void *handle = api.handles.getFocusedViewHandle();
 	if (mods & mod_control) api.cursor.moveWhile(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, &whileWord);
 	else api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_grapheme_cluster);
 }
@@ -281,7 +115,7 @@ void _moveRight(TextBuffer *textBuffer, Mods mods)
 #else 
 void _moveRight(Mods mods)
 {
-	void *handle = api.handles.getActiveViewHandle();
+	void *handle = api.handles.getFocusedViewHandle();
 	if (mods & mod_control) api.cursor.moveWhile(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, &whileWord);
 	else api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_grapheme_cluster);
 }
@@ -299,7 +133,7 @@ void _moveUp(TextBuffer *textBuffer, Mods mods)
 #else
 void _moveUp(Mods mods)
 {
-	void *handle = api.handles.getActiveViewHandle();
+	void *handle = api.handles.getFocusedViewHandle();
 	api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_line);
 }
 #endif
@@ -328,7 +162,7 @@ void _moveDown(TextBuffer *textBuffer, Mods mods)
 #else
 void _moveDown(Mods mods)
 {
-	void *handle = api.handles.getActiveViewHandle();
+	void *handle = api.handles.getFocusedViewHandle();
 	api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift ? do_select : no_select, move_mode_line);
 }
 #endif
@@ -351,13 +185,13 @@ void _backSpace(TextBuffer *textBuffer,Mods mods)
 #else
 void _backSpace(Mods mods)
 {
-	void *handle = api.handles.getActiveViewHandle();
+	void *handle = api.handles.getFocusedViewHandle();
 	int number_of_cursors = api.cursor.number_of_cursors(handle);
 	for (int i = 0; i < number_of_cursors; i++)
 	{
 		if (api.cursor.selection_length(handle, i))
 		{
-			api.cursor.delete_selected(handle, i);
+			api.cursor.delete_selection(handle, i);
 		}
 		else
 		{
@@ -390,13 +224,13 @@ void _delete(TextBuffer *textBuffer, Mods mods)
 #else
 void _delete(Mods mods)
 {
-	void *handle = api.handles.getActiveViewHandle();
+	void *handle = api.handles.getFocusedViewHandle();
 	int number_of_cursors = api.cursor.number_of_cursors(handle);
 	for (int i = 0; i < number_of_cursors; i++)
 	{
 		if (api.cursor.selection_length(handle, i))
 		{
-			api.cursor.delete_selected(handle, i);
+			api.cursor.delete_selection(handle, i);
 		}
 		else
 		{
@@ -509,24 +343,6 @@ internal bool hasOkExtension(DHSTR_String file_name)
 	return false;
 }
 
-internal void bindCommand(char *name, void(*func)(Data *data, DHSTR_String restOfTheBuffer))
-{
-	CommandInfo commandInfo = {};
-	commandInfo.name= name;
-	commandInfo.hashedName = hash(name);
-	commandInfo.func = func;
-	Add(&commands, commandInfo);
-}
-
-internal void bindCommand(char *name, void(*func)(Data *data, DHSTR_String restOfTheBuffer),void(*charDown)(Data *data, DHSTR_String restOfTheBuffer))
-{
-	CommandInfo commandInfo = {};
-	commandInfo.name= name;
-	commandInfo.hashedName = hash(name);
-	commandInfo.func = func;
-	commandInfo.charDown = charDown;
-	Add(&commands, commandInfo);
-}
 
 #if 0
 internal void compareCommand(Data *data)
@@ -688,7 +504,7 @@ internal void insertCaretBelow(TextBuffer *buffer)
 {
 	insertCaret(buffer, below);
 }
-
+#if 0
 internal void removeAllButOneCaret(TextBuffer *buffer)
 {
 	for (int i = 1; i < buffer->ownedCarets_id.length; )
@@ -696,6 +512,7 @@ internal void removeAllButOneCaret(TextBuffer *buffer)
 		removeCaret(buffer, 1, true);
 	}
 }
+#endif
 
 internal void win32_runBuild(Data *data) //this is *highly* platform dependant. Should be moved to win32.cpp
 {	//and refactor out the openfile into buffeer into its own win32 function.
@@ -825,7 +642,7 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 		hideCommandLine(data);
 
 #if 1
-		// null pointers below because it's a vararg and passing 0 instead of (void *) 0 only works if (void *) is one word 
+		// null pointers below because it's a vararg and passing 0 instead of (void *) 0 only works if sizeof(void *) == sizeof(int)
 		switch (data->textBuffers.length)
 		{
 		case 1:
@@ -849,9 +666,10 @@ internal void openFileCommand(Data *data, DHSTR_String restOfTheBuffer)
 	}
 }
 #else
-internal void openFileCommand(char *start, int length)
+internal void openFileCommand(char *start, int length, void **user_data)
 {
-	
+	api.view.createFromFile(start, length);
+	api.commandLine.close();
 }
 #endif
 
@@ -1452,8 +1270,8 @@ internal void setBindingsLocal(TextBuffer *textBuffer)
 #else 
 internal void setBindingsLocal(void *view_handle)
 {
-	api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_selection);
-	api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_bigTitles);
+	//api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_selection);
+	//api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_bigTitles);
 	api.callbacks.bindKey_mods(view_handle, VK_LEFT, atMost, mod_control | mod_shift, _moveLeft);
 	api.callbacks.bindKey_mods(view_handle, VK_RIGHT, atMost, mod_control | mod_shift, _moveRight);
 	api.callbacks.bindKey_mods(view_handle, VK_BACK, atMost, mod_control, _backSpace);
@@ -1494,12 +1312,12 @@ internal void setBindingsLocal(void *view_handle)
 		//api.callbacks.bindKey(view_handle, VK_UP, precisely, mod_none, moveUpMenu);
 		api.callbacks.bindKey(view_handle, VK_ESCAPE, precisely, mod_none, hideCommandLine);
 
-		api.callbacks.bindCommand(view_handle, "openFile", openFileCommand, 0,0);
-		api.callbacks.bindCommand(view_handle, "o", openFileCommand, 0,0);
-		api.callbacks.bindCommand(view_handle, "createFile", api.view.createFromFile ,0,0);
-		api.callbacks.bindCommand(view_handle, "closeBuffer", [](char *start, int length) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
-		api.callbacks.bindCommand(view_handle, "c", [](char *start, int length) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
-		api.callbacks.bindCommand(view_handle, "find", find, find_mark_down,0);
+		api.callbacks.bindCommand("openFile", openFileCommand, 0,0);
+		api.callbacks.bindCommand("o", openFileCommand, 0,0);
+		api.callbacks.bindCommand("createFile", [](char *start, int length, void **userdata) {api.view.createFromFile(start, length); }, 0, 0);
+		api.callbacks.bindCommand("closeBuffer", [](char *start, int length,void **ud) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
+		api.callbacks.bindCommand("c", [](char *start, int length, void **ud) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
+		//api.callbacks.bindCommand("find", find, find_mark_down,0);
 	}
 
 	api.callbacks.bindKey(view_handle, 'O', precisely, mod_control, preFeedOpenFile);

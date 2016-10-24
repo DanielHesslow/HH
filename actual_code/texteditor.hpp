@@ -63,7 +63,7 @@ internal int getLineFromIterator(TextBuffer *buffer, MGB_Iterator it);
 internal CharRenderingInfo renderingStateFromLine(TextBuffer *buffer, int line);
 internal int getLineStart(BackingBuffer *backingBuffer, int line);
 internal void freeBufferedCharacters();
-internal int getLineLength(TextBuffer *textBuffer, int line);
+internal int getLineLength(BackingBuffer *backingBuffer, int line);
 
 CharRenderingInfo apply_rendering_changes_at(TextBuffer *textBuffer, Location loc, CharRenderingInfo rendering);
 
@@ -141,7 +141,7 @@ internal void gotoStartOfLine(TextBuffer *textBuffer, int line, select_ selectio
 	
 	for (int i = 0; i<currentChar - lineChar; i++)
 	{
-		move_nc(textBuffer, dir_left, caretIdIndex, do_log, selection,movemode_byte);
+		move_nc(textBuffer, dir_left, caretIdIndex, do_log, selection, movemode_byte);
 	}
 	for (int i = 0; i<lineChar - currentChar; i++)
 	{
@@ -154,7 +154,7 @@ internal void moveCaretToX(TextBuffer *textBuffer, int targetX, select_ selectio
 	// this assumes that we're on the start of the line.
 
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
-	int line = getLineFromCaret(textBuffer, caretId);
+	int line = getLineFromCaret(textBuffer->backingBuffer, caretId);
 	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
 	Location loc = { line,0 };
 
@@ -574,7 +574,7 @@ internal float scaleFromLine(TextBuffer *textBuffer, int line)
 internal int lineHeightFromLine(TextBuffer *textBuffer, int line)
 {
 	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
-	int len = getLineLength(textBuffer, line);
+	int len = getLineLength(textBuffer->backingBuffer, line);
 	Location loc = { line,0 };
 	int m = 0;
 	for (int i = 0; i < len; i++) // might be cached if needed. 
@@ -588,7 +588,7 @@ internal int lineHeightFromLine(TextBuffer *textBuffer, int line)
 internal int descentFromLine(TextBuffer *textBuffer, int line)
 {
 	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
-	int len = getLineLength(textBuffer, line);
+	int len = getLineLength(textBuffer->backingBuffer, line);
 	Location loc = { line,0 };
 	int m = 0;
 	for (int i = 0; i < len; i++) // might be cached if needed. 
@@ -682,11 +682,11 @@ internal int getLines(BackingBuffer *buffer)
 	return buffer->lines;
 }
 
-internal void updateLineData(TextBuffer *textBuffer)
+internal void updateLineData(BackingBuffer *backingBuffer)
 {
-	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
+	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
 	BufferChange entry;
-	while (next_history_change(textBuffer->backingBuffer, &updateLineData, &entry))
+	while (next_history_change(backingBuffer, &updateLineData, &entry))
 	{
 		assert(entry.location.line >= 0);
 		switch (entry.action)
@@ -727,10 +727,10 @@ internal void updateLineData(TextBuffer *textBuffer)
 	}
 }
 
-internal int getLineLength(TextBuffer *textBuffer, int line)
+internal int getLineLength(BackingBuffer *backingBuffer, int line)
 {
-	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
-	updateLineData(textBuffer);
+	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
+	updateLineData(backingBuffer);
 	int value;
 	if (!binsumtree_leaf_value(sum_tree, line, &value))
 	{
@@ -739,16 +739,16 @@ internal int getLineLength(TextBuffer *textBuffer, int line)
 	return value;
 }
 
-internal int getLine(TextBuffer *textBuffer, int pos)
+internal int getLine(BackingBuffer *backingBuffer, int pos)
 {
-	DynamicArray_int *sum_tree = &textBuffer->backingBuffer->lineSumTree;
-	updateLineData(textBuffer);
+	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
+	updateLineData(backingBuffer);
 	int res_index = -1;
 	if (!binsumtree_search(sum_tree, pos, &res_index))
 	{
-		res_index = max(0,getLines(textBuffer->backingBuffer)-1);
+		res_index = max(0,getLines(backingBuffer)-1);
 	}
-	int total_lines = getLines(textBuffer->backingBuffer);
+	int total_lines = getLines(backingBuffer);
 	if (res_index >= total_lines)return max((total_lines-1),0);
 	else return res_index;
 }
@@ -762,7 +762,7 @@ internal int getLineStart(BackingBuffer *backingBuffer, int line)
 internal Location getLocation(TextBuffer *buffer, int pos)
 {
 	Location loc;
-	loc.line = getLine(buffer, pos);
+	loc.line = getLine(buffer->backingBuffer, pos);
 	int start = getLineStart(buffer->backingBuffer, loc.line);
 	loc.column = pos - start;
 	assert(loc.line >= 0 && loc.column >= 0);
@@ -772,21 +772,21 @@ internal Location getLocation(TextBuffer *buffer, int pos)
 internal int getLineFromIterator(TextBuffer *buffer, MGB_Iterator it)
 {
 	int pos = getIteratorPos(buffer->backingBuffer->buffer, it);
-	return getLine(buffer, pos);
+	return getLine(buffer->backingBuffer, pos);
 }
 
-internal Location locationFromIterator(TextBuffer *buffer, MGB_Iterator it)
+internal Location locationFromIterator(BackingBuffer *backingBuffer, MGB_Iterator it)
 {
-	int pos = getIteratorPos(buffer->backingBuffer->buffer, it);
-	int line = getLine(buffer, pos);
-	int line_start = getLineStart(buffer->backingBuffer, line);
+	int pos = getIteratorPos(backingBuffer->buffer, it);
+	int line = getLine(backingBuffer, pos);
+	int line_start = getLineStart(backingBuffer, line);
 	return{line, pos-line_start};
 }
 
-internal int getLineFromCaret(TextBuffer *buffer, int caretId)
+internal int getLineFromCaret(BackingBuffer *backingBuffer, int caretId)
 {
-	int pos = getCaretPos(buffer->backingBuffer->buffer, caretId);
-	return getLine(buffer, pos);
+	int pos = getCaretPos(backingBuffer->buffer, caretId);
+	return getLine(backingBuffer, pos);
 }
 
 internal Location getLocationFromCaret(TextBuffer *buffer, int caretId)
@@ -797,7 +797,7 @@ internal Location getLocationFromCaret(TextBuffer *buffer, int caretId)
 
 internal float getCurrentScale(TextBuffer *textBuffer, int caretIndexId)
 {
-	return scaleFromLine(textBuffer,getLineFromCaret(textBuffer, textBuffer->ownedCarets_id.start[caretIndexId]));
+	return scaleFromLine(textBuffer,getLineFromCaret(textBuffer->backingBuffer, textBuffer->ownedCarets_id.start[caretIndexId]));
 }
 
 //---Character Functions---
@@ -868,10 +868,8 @@ internal void appendCharacter(TextBuffer *textBuffer, char character, int caretI
 {
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
 	Location loc;
-	if (log)
-		loc = getLocationFromCaret(textBuffer, caretId);
-	if (log)
-		logAdded(textBuffer, character, caretIdIndex, loc);
+	if (log) loc = getLocationFromCaret(textBuffer, caretId);
+	if (log) logAdded(textBuffer, character, caretIdIndex, loc);
 	
 	appendCharacter(textBuffer->backingBuffer->buffer, caretId, character);
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
@@ -1228,7 +1226,7 @@ internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdInd
 {
 	setPreferedX(textBuffer, caretIdIndex);
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
-	int line = getLineFromCaret(textBuffer, caretId);
+	int line = getLineFromCaret(textBuffer->backingBuffer, caretId);
 	int targetLine = line + (up ? -1 : 1);
 	assert(line >= 0);
 	if (targetLine >= 0 && targetLine < getLines(textBuffer->backingBuffer))
@@ -1256,7 +1254,7 @@ internal void insertTab(TextBuffer *textBuffer)
 		// tabs are always inserted in the begining of a line
 		// the alternative doesn't make sence to me, 
 		// at least not when programming..
-		int line = getLineFromCaret(textBuffer, caretId);
+		int line = getLineFromCaret(textBuffer->backingBuffer, caretId);
 		char currentChar = getCaretPos(textBuffer->backingBuffer->buffer, caretId);
 		int lineChar = getLineStart(textBuffer->backingBuffer,line);
 		int diff = currentChar - lineChar;
@@ -1277,7 +1275,7 @@ internal void removeTab(TextBuffer *textBuffer)
 	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
 	{
 		int caretId = textBuffer->ownedCarets_id.start[i];
-		int line = getLineFromCaret(textBuffer, caretId);
+		int line = getLineFromCaret(textBuffer->backingBuffer, caretId);
 		char currentChar = getCaretPos(textBuffer->backingBuffer->buffer, caretId);
 		int lineChar = getLineStart(textBuffer->backingBuffer, line);
 		int diff = currentChar - lineChar;
@@ -1513,7 +1511,7 @@ internal bool openFileIntoNewBackingBuffer(BackingBuffer **_out_backingBuffer, D
 		}
 	}
 	// @cleanup relies on the fact that initial index is implicit.
-	DH_Allocator macro_used_allocator = ret->allocator;
+	DH_Allocator macro_used_allocator = ret->commonBuffer.allocator;
 	ret->path = DHSTR_CPY(file_name, ALLOCATE);
 	*_out_backingBuffer = ret;
 	return success;
@@ -1525,7 +1523,7 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 	DH_Allocator allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "BackingBuffer arena"));
 	BackingBuffer *buffer = (BackingBuffer *)Allocate(allocator, sizeof(BackingBuffer), "textBuffer: backingBuffer");
 	*buffer = {};
-	buffer->allocator = allocator;
+	buffer->commonBuffer.allocator = allocator;
 	MultiGapBuffer *stringBuffer = (MultiGapBuffer *)Allocate(allocator, sizeof(MultiGapBuffer), "multi gap buffer");
 	*stringBuffer = createMultiGapBuffer(initialMultiGapBufferSize);
 	History history = {};
@@ -1566,7 +1564,7 @@ void detach_BackingBuffer(TextBuffer *textBuffer)
 	{
 		bool hasRemoved;
 		remove(&open_files, backingBuffer->path, &hasRemoved);
-		arena_deallocate_all(backingBuffer->allocator); // including the actual backingBuffer. Nifty.
+		arena_deallocate_all(backingBuffer->commonBuffer.allocator); // including the actual backingBuffer. Nifty.
 	}
 	textBuffer->backingBuffer = (BackingBuffer *)0;
 }
@@ -1770,6 +1768,10 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 void InsertCaret(TextBuffer *buffer, int pos, int index)  //for history reasons.
 {
 	//WHAT
+
+	// why the fuck does it say WHAT here? //slightly older Daniel
+	// also what the fuck for history reasons, we havn't released anything dude.
+
 	int id_sel = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
 	Insert(&buffer->ownedSelection_id, id_sel, index);
 	int id = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
@@ -2426,16 +2428,17 @@ internal void renderRect(Bitmap bitmap, Rect rect, int color)
 	renderRect(bitmap, rect.x, rect.y, rect.width, rect.height, color);
 }
 
-internal MGB_Iterator iteratorFromLine(TextBuffer *textBuffer, int line)
+internal MGB_Iterator iteratorFromLine(BackingBuffer *backingBuffer, int line)
 {
-	int start = getLineStart(textBuffer->backingBuffer, line);
-	return getIterator(textBuffer->backingBuffer->buffer, start);
+	int start = getLineStart(backingBuffer, line);
+	return getIterator(backingBuffer->buffer, start);
 }
 
-internal MGB_Iterator iteratorFromLocation(TextBuffer *textBuffer, Location loc)
+
+internal MGB_Iterator iteratorFromLocation(BackingBuffer *backingBuffer, Location loc)
 {
-	int start = getLineStart(textBuffer->backingBuffer, loc.line);
-	return getIterator(textBuffer->backingBuffer->buffer, start+loc.column);
+	int start = getLineStart(backingBuffer, loc.line);
+	return getIterator(backingBuffer->buffer, start+loc.column);
 }
 
 
@@ -2561,7 +2564,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine,in
 */
 internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret)
 {
-	MGB_Iterator it = iteratorFromLine(textBuffer, startLine);
+	MGB_Iterator it = iteratorFromLine(textBuffer->backingBuffer, startLine);
 
 	int orgX = x;
 	bool ended = false;
@@ -2665,7 +2668,7 @@ internal void mark_selection(TextBuffer *textBuffer)
 
 internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret)
 {
-	MGB_Iterator it = iteratorFromLine(textBuffer, startLine);
+	MGB_Iterator it = iteratorFromLine(textBuffer->backingBuffer, startLine);
 	
 	int orgX = x;
 	bool ended = false;
@@ -2882,7 +2885,7 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 {
 	//CLEAN ME UP AND CREATE A ANIMATION SYSTEM
 	int visibleLines = calculateVisibleLines(textBuffer, bitmap, textBuffer->lastWindowLineOffset);
-	int line = getLineFromCaret(textBuffer, textBuffer->ownedCarets_id.start[0]);
+	int line = getLineFromCaret(textBuffer->backingBuffer, textBuffer->ownedCarets_id.start[0]);
 	float targetY = clamp(round(textBuffer->lastWindowLineOffset), line - visibleLines+1, line);
 	
 	float diff = (targetY - textBuffer->lastWindowLineOffset);
@@ -2933,7 +2936,7 @@ internal void clearBuffer(MultiGapBuffer *buffer)
 
 internal int getIndentLine(TextBuffer buffer, int line)
 {
-	MGB_Iterator it = iteratorFromLine(&buffer, line);
+	MGB_Iterator it = iteratorFromLine(buffer.backingBuffer, line);
 	int c=0;
 	do
 	{
@@ -3028,7 +3031,7 @@ internal void initTextBuffer(TextBuffer *textBuffer)
 internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
 {
 	int height = 4;
-	float progress = (float)getLineFromCaret(textBuffer,textBuffer->ownedCarets_id.start[0])/ ((float)getLines(textBuffer->backingBuffer)-1);
+	float progress = (float)getLineFromCaret(textBuffer->backingBuffer,textBuffer->ownedCarets_id.start[0])/ ((float)getLines(textBuffer->backingBuffer)-1);
 	int h = (progress * (bitmap.height-height));
 
 	renderRect(bitmap, bitmap.width - 10, h, 10, height, (int)active_colorScheme.foregroundColor );
@@ -3507,9 +3510,10 @@ void render_and_advance(Bitmap bitmap, char **ptr)
 	}
 }
 Layout *leaf = (Layout *)0;
-internal void renderFrame(Data data, Bitmap bitmap, uint64_t microsStart)
+internal void renderFrame(Data *pdata, Bitmap bitmap, uint64_t microsStart)
 {
-	global_data = &data;
+	Data data = *pdata;
+	global_data = pdata;
 	local_persist bool wasCommandLineActive = false;
 	if (data.updateAllBuffers || wasCommandLineActive||true)
 	{

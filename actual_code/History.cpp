@@ -62,12 +62,12 @@ bool get_next_HistoryEntry_index(History *history, int *in_out_index) //in out i
 		++*in_out_index;
 	return success;
 }
-internal int getLineLength(TextBuffer *textBuffer, int line);
+internal int getLineLength(BackingBuffer *backingBuffer, int line);
 
 Location move_right(TextBuffer *textBuffer, Location loc)
 {
 	++loc.column;
-	if (loc.column > getLineLength(textBuffer, loc.line))
+	if (loc.column > getLineLength(textBuffer->backingBuffer, loc.line))
 	{
 		loc.column = 0;
 		++loc.line;

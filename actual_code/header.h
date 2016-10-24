@@ -163,10 +163,8 @@ enum ModMode
 
 enum FuncType
 {
-	Arg_TextBuffer,
-	Arg_TextBuffer_Mods,
-	Arg_Data,
-
+	Arg_Mods,
+	Arg_Void,
 };
 
 struct KeyBinding
@@ -177,9 +175,8 @@ struct KeyBinding
 	FuncType funcType;
 	union //  appearently this is implementation defined behaviour... well what eves...
 	{
-		void(*func_TextBuffer_Mods)(TextBuffer *buffer, Mods mods);
-		void(*func_TextBuffer)(TextBuffer *buffer);
-		void(*func_Data)(Data *data);
+		void(*func_Mods)(Mods mods);
+		void(*func)();
 		void *funcP;
 	};
 	int last_event_peeked;
@@ -231,6 +228,7 @@ DEFINE_HashTable(PVOID, HistoryChangeTracker, silly_hash_void_ptr, ptr_eq)
 struct CommonBuffer
 {
 	HashTable_BindingIdentifier_PVOID bindingMemory;
+	DH_Allocator allocator;
 };
 
 struct BackingBuffer
@@ -243,7 +241,6 @@ struct BackingBuffer
 	HashTable_PVOID_HistoryChangeTracker binding_next_change;
 	uint64_t ref_count;
 	DHSTR_String path; 
-	DH_Allocator allocator;
 };
 
 
@@ -335,10 +332,10 @@ struct Color
 	}
 	explicit operator int()
 	{
-		return (((uint8_t)(a * 256)) << 24)|
-			   (((uint8_t)(r * 256)) << 16)|
-		       (((uint8_t)(g * 256)) << 8) |
-			   (((uint8_t)(b * 256)) << 0);
+		return (((uint8_t)(a * 255)) << 24)|
+			   (((uint8_t)(r * 255)) << 16)|
+		       (((uint8_t)(g * 255)) << 8) |
+			   (((uint8_t)(b * 255)) << 0);
 	}
 };
 bool color_eq(void *a, void *b)
@@ -350,6 +347,10 @@ bool color_eq(void *a, void *b)
 Color rgb(float red, float green, float blue)
 {
 	return{ 1.0f, red, green, blue };
+}
+Color argb(float alpha,float red, float green, float blue)
+{
+	return{alpha, red, green, blue };
 }
 
 float _hue_to_rgb(float p, float q, float t)
@@ -385,7 +386,14 @@ Color hsl(float h, float s, float l) {
 
 	return{1.0f, r,g,b,};
 }
-
+Color colorFromInt(int i)
+{
+	float a = ((i & 0xff000000) >> 24)/(255.0f);
+	float r = ((i & 0x00ff0000) >> 16)/(255.0f);
+	float g = ((i & 0x0000ff00) >> 8 )/(255.0f);
+	float b = ((i & 0x000000ff) >> 0 )/(255.0f);
+	return argb(a, r, g, b);
+}
 
 
 
@@ -545,8 +553,10 @@ enum select_
 struct MGB_Iterator;
 
 internal bool 		isLineBreak(char32_t codepoint);
-internal void 		appendCharacter(TextBuffer *textBuffer, char character, int caretId, bool log = true);
+internal void       appendCharacter(TextBuffer *textBuffer, char character, int caretIdIndex, bool log = true);
 internal void		removeCharacter(TextBuffer *textBuffer, bool log = true);
+internal bool       removeCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log = true);
+internal void unDeleteCharacter(TextBuffer *textBuffer, char character, int caretIdIndex);
 
 
 internal bool 		deleteCharacter(TextBuffer *textBuffer, int caretId,bool log = true);
@@ -563,14 +573,21 @@ internal char *getRestAsString(MultiGapBuffer *buffer, MGB_Iterator it);
 internal void		CloseCommandLine(Data *data);
 void setNoSelection(TextBuffer *textBuffer, log_ log);
 internal void removeSelection(TextBuffer *textBuffer);
-internal MGB_Iterator iteratorFromLine(TextBuffer *textBuffer, int line);
-internal int getLineFromCaret(TextBuffer *buffer, int caretId);
+internal void removeSelection(TextBuffer *textBuffer, int caretIdIndex);
+internal MGB_Iterator iteratorFromLine(BackingBuffer *backingBuffer, int line);
+internal int getLineFromCaret(BackingBuffer *buffer, int caretId);
 internal void gotoStartOfLine(TextBuffer *textBuffer, int line, select_ selection, int caretIdIndex);
 internal bool validSelection(TextBuffer *buffer);
 internal void moveWhile(TextBuffer *textBuffer, select_ selection, log_ log, bool setPrefX, Direction dir, bool(*func)(char, int *));
 internal bool whileSameLine(char character, int *state);
 internal void move(TextBuffer *textBuffer, Direction dir, log_ log, select_ selection);
 internal bool move(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection);
+internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex, bool up);
+internal int getLineStart(BackingBuffer *backingBuffer, int line);
+
+void removeCaret(TextBuffer *buffer, int caretIdIndex, bool log);
+void AddCaret(TextBuffer *buffer, int pos);
+
 bool getActiveBuffer(Data *data, TextBuffer **activeBuffer_out);
 
 enum MoveMode
@@ -579,6 +596,7 @@ enum MoveMode
 	movemode_codepoint,
 	movemode_grapheme_cluster,
 };
+
 internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection, MoveMode mode);
 internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type, MoveMode mode);
 

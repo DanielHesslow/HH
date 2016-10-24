@@ -126,7 +126,7 @@ InternalClipboard deSerialize_InternalClipboard(char **buffer)
 internal char16_t *getLineAsString(TextBuffer *buffer, int caretIdIndex)
 {
 	MultiGapBuffer *mg_buffer = buffer->backingBuffer->buffer;
-	MGB_Iterator it = iteratorFromLine(buffer, getLineFromCaret(buffer, buffer->ownedCarets_id.start[caretIdIndex]));
+	MGB_Iterator it = iteratorFromLine(buffer->backingBuffer, getLineFromCaret(buffer->backingBuffer, buffer->ownedCarets_id.start[caretIdIndex]));
 	DynamicArray_char16_t dynamicString = constructDynamicArray_char16_t(50, "getLineAsString");
 	for (;;)
 	{
@@ -206,7 +206,7 @@ internal void paste(TextBuffer *textBuffer)
 			ClipboardItem item = board.clips.start[i];
 			if (item.onSeperateLine)
 			{
-				gotoStartOfLine(textBuffer, getLineFromCaret(textBuffer, textBuffer->ownedCarets_id.start[i]), no_select, i);
+				gotoStartOfLine(textBuffer, getLineFromCaret(textBuffer->backingBuffer, textBuffer->ownedCarets_id.start[i]), no_select, i);
 			}
 
 			int length = DHSTR_strlen(item.string);

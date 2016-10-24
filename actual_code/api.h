@@ -3,6 +3,7 @@
 #include "core_heder.h"
 
 
+
 #ifdef TYPE_SAFETY
 struct ViewHandle
 {
@@ -48,7 +49,7 @@ struct ViewIterator
 };
 
 
-typedef void(*StringFunction)(char *string_remaining, int string_length);
+typedef void(*StringFunction)(char *string_remaining, int string_length, void **user_data);
 	
 #define ALL_CURSORS -1
 
@@ -76,18 +77,19 @@ struct RenderingState
 // feel free to add more modes, just keep these at the top.
 enum BufferModes
 {
-	buffer_mode_defualt	    = 0,
-	buffer_mode_commandline = 1,
+	buffer_mode_commandline = 0,
+	buffer_mode_defualt	    = 1,
 };
+
 
 struct API
 {
 	struct
 	{
-		void (*registerCallBack)(CallBackTime time, ViewHandle view_handle, void *function);
+		void (*registerCallBack)(CallBackTime time, ViewHandle view_handle, void (*function)(ViewHandle handle));
 		void (*bindKey_mods)(ViewHandle view_handle, char VK_Code, ModMode filter, Mods mods, void(*func)(Mods mods));
 		void (*bindKey)(ViewHandle view_handle, char VK_Code, ModMode filter, Mods mods, void(*func)());
-		void (*bindCommand)(ViewHandle view_handle, char *name, StringFunction enter, StringFunction charDown, StringFunction escape);
+		void (*bindCommand)(char *name, StringFunction select, StringFunction charDown, void (*interupt)(void **user_data));
 	}callbacks;
 	
 	struct
@@ -95,17 +97,16 @@ struct API
 		ViewHandle(*getActiveViewHandle)();	 // does not include the commandline, may return null if no buffer is open
 		ViewHandle(*getFocusedViewHandle)();    // includes the commandline
 		ViewHandle(*getCommandLineViewHandle)();
-		ViewHandle(*getViewHandleFromIndex)();
+		ViewHandle(*getViewHandleFromIndex)(int);
 		BufferHandle(*getActiveBufferHandle)();	 // does not include the commandline, may return null if no buffer is open
-		BufferHandle(*getFocusedBufferandle)();    // includes the commandline
+		BufferHandle(*getFocusedBufferHandle)();    // includes the commandline
 		BufferHandle(*getCommandLineBufferHandle)();
 		BufferHandle(*getBufferHandleFromViewHandle)(ViewHandle view_handle);
 	}handles;
 
 	struct
 	{
-		void  (*setFunctionInfo) (void *handle, void *function);
-		void *(*getFunctionInfo) (void *handle, void *function);
+		void **(*getFunctionInfo) (void *handle, void *function);
 		void *(*allocateMemory)  (void *handle, size_t size);
 		void  (*deallocateMemory)(void *handle, void *memory);
 	}memory;
@@ -123,26 +124,30 @@ struct API
 	{
 		bool (*moveWhile)(ViewHandle view_handle, int direction, int cursor_index, bool select, bool(*function)(char character, int *state));
 		bool (*removeWhile)(ViewHandle view_handle, int direction, int cursor_index, bool(*function)(char character, int *state));
-		bool (*move)(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode);
-		bool (*moveToLocation)(ViewHandle view_handle, int line, int column);
-		bool (*moveToByteIndex)(ViewHandle view_handle, int byte_index);
-		bool (*insert)(ViewHandle view_handle, int *_out_cursor_index);
+		int (*move)(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode);
+
+		bool (*moveToLocation)(ViewHandle view_handle, int cursor_index, bool select, int line, int column);
+
+		int (*add)(ViewHandle view_handle, int line, int column);
+		bool (*remove)(ViewHandle view_handle, int cursor_index);
+
 		void (*append_codepoint)(ViewHandle view_handle, int cursor_index, int direction, char32_t character);
 		void (*remove_codepoint)(ViewHandle view_handle, int cursor_index, int direction);
 		int  (*selection_length)(ViewHandle view_handle, int cursor_index);
-		int  (*delete_selected)(ViewHandle view_handle, int cursor_index);
+		int  (*delete_selection)(ViewHandle view_handle, int cursor_index);
 		int  (*number_of_cursors)(ViewHandle view_handle);
+
 	} cursor;
 
 	struct
 	{
-		void (*createFromFile)(char *path, int path_length);
+		ViewHandle(*createFromFile)(char *path, int path_length);
 		void (*clone_view)(ViewHandle view_handle);
 		void  (*close)(ViewHandle view_handle);
 		void(*setActive)(ViewHandle view_handle);  //excluding commandline
 		void(*setFocused)(ViewHandle view_handle); //including commandline
 
-		void(*set_mode)(ViewHandle view_handle, int type);
+		void(*set_type)(ViewHandle view_handle, int type);
 		int(*get_type)(ViewHandle view_handle);
 
 	}view;
@@ -182,7 +187,7 @@ struct API
 	{
 		TextIterator (*make)(BufferHandle buffer_handle);
 		TextIterator (*make_from_location)(BufferHandle buffer_handle,Location loc);
-		TextIterator (*make_from_cursor)(BufferHandle buffer_handle, Location loc);
+		TextIterator (*make_from_cursor)(BufferHandle buffer_handle, int cursor);
 		bool     (*nextByte)(TextIterator *it, char *out_result_, bool wrap);
 		bool     (*nextCodepoint)(TextIterator *it, char32_t *out_result, bool wrap);
 	}text_iterator;

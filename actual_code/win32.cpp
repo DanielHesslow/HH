@@ -597,7 +597,7 @@ WinMain(HINSTANCE instance,
 				//data.updateAllBuffers |= redrawAll;
 				data.updateAllBuffers = true;
 				//need to handle dt!
-				renderFrame(data, bitmap.bitmap, MicorSeconds_Since_StartUP);
+				renderFrame(&data, bitmap.bitmap, MicorSeconds_Since_StartUP);
 				HDC deviceContext = GetDC(window);
 				win32WindowDimensions windowDims = getWindowDimensions(window);
 				win32UpdateWindow(deviceContext, windowDims.width, windowDims.height, bitmap);
