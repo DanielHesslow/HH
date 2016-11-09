@@ -14,6 +14,36 @@ struct CommandInfo
 	void(*charDown)(char *str, int strlen, void **user_data);
 };
 
+//just a helper funtction to be able to iterate on all cursors. state is assumed to be initialized to 0
+inline bool next_cursor(TextBuffer *buffer, int cursor_index, int *out_cursor_index, int *state)
+{
+	if (cursor_index == ALL_CURSORS)
+	{
+		if ((*state)++ < buffer->ownedCarets_id.length)
+		{
+			*out_cursor_index = *state-1;
+			return true;
+		}
+		else
+		{
+			*out_cursor_index = -1;
+			return false;
+		}
+	}
+	else
+	{
+		if (!((*state)++))
+		{
+			*out_cursor_index = cursor_index;
+			return true;
+		}
+		else
+		{
+			*out_cursor_index = -1;
+			return false;
+		}
+	}
+}
 
 
 DEFINE_DynamicArray(CommandInfo)
@@ -123,6 +153,22 @@ bool matchMods(Mods mods, Mods filter, ModMode mode)
 }
 
 global_variable DynamicArray_KeyBinding *bindings = (DynamicArray_KeyBinding *)0;
+API getAPI();
+
+
+
+
+
+
+
+void _setLocalBindings(TextBuffer *textBuffer)
+{
+	if (!setBindingsLocal)return;
+	assert(bindings == 0); // this is fine till we're using mutple threads, assert to make sure!
+	bindings = &textBuffer->KeyBindings;
+	setBindingsLocal(getAPI(), textBuffer);
+	bindings = (DynamicArray_KeyBinding *)0;
+}
 
 KeyBinding bindKeyBase(char VK_Code, ModMode modMode, Mods mods, void *func)
 {
@@ -225,7 +271,7 @@ bool next_view(ViewIterator *iterator, ViewHandle *view_handle)
 	int ack = 0;
 	for (int i = 0; i < global_data->textBuffers.length; i++)
 	{
-		if (&global_data->textBuffers.start[i].backingBuffer == iterator->buffer_handle)
+		if (global_data->textBuffers.start[i].backingBuffer == iterator->buffer_handle)
 		{
 			if (ack++ == iterator->next)
 			{
@@ -262,8 +308,6 @@ bool hash_moved_since_last(BufferHandle buffer_handle, void *function)
 {
 	return has_move_changed((BackingBuffer *)buffer_handle, function);
 }
-
-
 
 void clipboard_copy(ViewHandle view_handle)
 {
@@ -352,60 +396,148 @@ MoveMode MoveMode_from_API_MoveMode(API_MoveMode mode)
 	}
 	return movemode_byte;
 }
-
+TextIterator make_from_cursor(ViewHandle view_handle, int cursor_index);
 int cursor_move(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode)
 {
 	int ack = 0;
 	TextBuffer *buffer = (TextBuffer *)view_handle;
-	if (cursor_index == ALL_CURSORS)
-	{
-		for (int i = 0; i < buffer->ownedCarets_id.length; i++)
-		{
-			for (int i = 0; i < abs(direction); i++)
-			{
-				if (mode == move_mode_line)
-				{
-					//TODO MAKE MOVE V RETURN SUCCESS
-					moveV_nc(buffer, select ? do_select : no_select, i, direction < 0);
-				}
-				else
-				{
-					ack += move_llnc_(buffer, direction > 0 ? dir_right : dir_left, buffer->ownedCarets_id.start[i], do_log, MoveMode_from_API_MoveMode(mode));
-				}
-			}
-			if (select)
-			{
-				setNoSelection(buffer, i, do_log);
-			}
-			if (mode != move_mode_line)
-				markPreferedCaretXDirty(buffer, i);
-		}
-	}
-	else
+	int state = 0;
+	int _cursor_index;
+	while (next_cursor(buffer,cursor_index, &_cursor_index, &state))
 	{
 		for (int i = 0; i < abs(direction); i++)
 		{
 			if (mode == move_mode_line)
 			{
 				//TODO MAKE MOVE V RETURN SUCCESS
-				moveV_nc(buffer, select ? do_select : no_select, cursor_index, direction < 0);
+				moveV_nc(buffer, select ? do_select : no_select, _cursor_index, direction < 0);
 			}
 			else
 			{
-				ack += move_llnc_(buffer, direction > 0 ? dir_right : dir_left, buffer->ownedCarets_id.start[cursor_index], do_log, MoveMode_from_API_MoveMode(mode));
+				ack += move_llnc_(buffer, direction > 0 ? dir_right : dir_left, buffer->ownedCarets_id.start[_cursor_index], true, MoveMode_from_API_MoveMode(mode));
 			}
 		}
-		if (select)
+		if (!select)
 		{
-			setNoSelection(buffer, cursor_index, do_log);
+			setNoSelection(buffer, _cursor_index, do_log);
 		}
 		if (mode != move_mode_line)
-			markPreferedCaretXDirty(buffer, cursor_index);
+			markPreferedCaretXDirty(buffer, _cursor_index);
 	}
-	removeOwnedEmptyCarets(buffer);
-
 	return ack; //return number of places the cursors have moved together.
 }
+
+
+struct StringAckumulator
+{
+	int length;
+	
+	char *buffer;
+
+	int capacity;
+	
+	void clear()
+	{
+		length = 0;
+	}
+
+	void push(char c, int dir)
+	{
+		assert(dir == 1 || dir == -1);
+		
+		length += dir;
+		if (abs(length)> capacity)
+		{
+			//need to grow..
+			assert(false);
+			return;
+		}
+		if (dir < 0 && length > 0 || dir > 0 && length < 0)
+		{
+			assert(buffer[length > 0 ? length : (capacity + length)] == c);
+		}
+		else
+		{
+			buffer[length > 0? length : (capacity + length)] = c;
+		}
+	}
+
+	int get_ackumulated(char **string)
+	{
+		if (length >= 0)
+		{
+			*string = buffer;
+			return length;
+		}
+		else
+		{
+			*string = buffer + capacity + length;
+			return -length;
+		}
+	}
+	int get_length()
+	{
+		return abs(length);
+	}
+};
+
+
+
+//OPTIMAL MOVE:
+#if 0
+#define FOR_CARET(c) for(int c = 0; c < 100; c++)
+{
+	FOR_CARET(c)
+	{
+		c.move_codepoint(10);
+		c.move_grapheme_cluster(-10);
+		c.move_byte(5); // dangerous, might split codepoint
+
+		while (is_letter(get_codepoint(c,-1)))
+		{
+			int read = c.move_codepoint(-1);
+			if (!read) break;
+		}
+
+		TextIterator it = get_it(c);
+		while (!is_space(get_byte(it, -1)))
+		{
+			int read = move_byte(it, -1);
+			if (!read)break;
+		}
+	}
+}
+#endif
+
+
+#if 0
+bool caret_move_while (ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode,bool(*function)(char32_t character, void **user_data))
+{
+
+	assert(mode != move_mode_line && "move while does not support line moves atm (maybe)");
+	TextBuffer *buffer = (TextBuffer *)view_handle;
+	int state = 0;
+	int _cursor_index;
+	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
+	{
+		int caretId = textBuffer->ownedCarets_id.start[_cursor_index];
+		void *user_data= 0;
+		while (func(charAtDirOfCaret(textBuffer->backingBuffer->buffer, dir, caretId), &user_data))
+		{
+			if (!move(textBuffer, dir, i, log, selection))
+			{
+				break;
+			}
+
+		}
+		if (setPrefX)
+			markPreferedCaretXDirty(textBuffer, i);
+		else
+			setPreferedX(textBuffer, i);
+	}
+	removeOwnedEmptyCarets(textBuffer);
+}
+#endif
 
 internal void removeAllButOneCaret(TextBuffer *buffer)
 {
@@ -449,88 +581,53 @@ bool cursor_remove(ViewHandle view_handle, int cursor_index)
 
 void cursor_append_codepoint(ViewHandle view_handle, int cursor_index, int direction, char32_t character)
 {
-	for (int i = 0; i < direction; i++)
+	TextBuffer *buffer = (TextBuffer *)view_handle;
+	int state = 0;
+	int _cursor_index;
+
+	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
 	{
-		TextBuffer *buffer = (TextBuffer *)view_handle;
-		if (cursor_index == ALL_CURSORS)
-		{
-			for (int i = 0; i < buffer->ownedCarets_id.length; i++)
-				unDeleteCharacter(buffer, character, cursor_index);
-		}
-		else
-		{
-			unDeleteCharacter(buffer, character, cursor_index);
-		}
-	}
-	
-	for (int i = 0; i < -direction; i++)
-	{
-		TextBuffer *buffer = (TextBuffer *)view_handle;
-		if (cursor_index == ALL_CURSORS)
-		{
-			for (int i = 0; i < buffer->ownedCarets_id.length;i++)
-				appendCharacter(buffer, character, i);
-		}
-		else
-		{
-			appendCharacter(buffer, character, cursor_index);
-		}
+		for (int i = 0; i < direction; i++)
+			unDeleteCharacter(buffer, character, _cursor_index);
+
+		for (int i = 0; i < -direction; i++)
+			appendCharacter(buffer, character, _cursor_index);
 	}
 }
 
 void cursor_remove_codepoint(ViewHandle view_handle, int cursor_index, int direction)
 {
-	for (int i = 0; i < direction; i++)
-	{
-		TextBuffer *buffer = (TextBuffer *)view_handle;
-		if (cursor_index == ALL_CURSORS)
-		{
-			for (int i = 0; i < buffer->ownedCarets_id.length; i++)
-				deleteCharacter(buffer, cursor_index);
-		}
-		else
-		{
-			deleteCharacter(buffer, cursor_index);
-		}
-	}
+	TextBuffer *buffer = (TextBuffer *)view_handle;
+	int state = 0;
+	int _cursor_index;
 
-	for (int i = 0; i < -direction; i++)
+	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
 	{
-		TextBuffer *buffer = (TextBuffer *)view_handle;
-		if (cursor_index == ALL_CURSORS)
-		{
-			for (int i = 0; i < buffer->ownedCarets_id.length; i++)
-				removeCharacter(buffer, i);
-		}
-		else
-		{
-			removeCharacter(buffer, cursor_index);
-		}
+		for (int i = 0; i < direction; i++)
+			deleteCharacter(buffer, _cursor_index);
+
+		for (int i = 0; i < -direction; i++)
+			removeCharacter(buffer, _cursor_index);
 	}
 }
 
-int  cursor_selection_length(ViewHandle view_handle, int cursor_index)
+int cursor_selection_length(ViewHandle view_handle, int cursor_index)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
 	int ack = 0;
-	if (cursor_index == ALL_CURSORS)
-	{
-		int selPos = getCaretPos(mgb, buffer->ownedSelection_id.start[cursor_index]);
-		int carPos = getCaretPos(mgb, buffer->ownedCarets_id.start[cursor_index]);
-		ack = abs(selPos - carPos);
-	}
-	else
-	{
-		for (int i = 0; i < buffer->ownedCarets_id.length;i++)
-		{
-			int selPos = getCaretPos(mgb, buffer->ownedSelection_id.start[i]);
-			int carPos = getCaretPos(mgb, buffer->ownedCarets_id.start[i]);
-			ack +=  abs(selPos - carPos);
-		}
-	}
-	return ack;
+	
+	int state = 0;
+	int _cursor_index;
 
+	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
+	{
+		int selPos = getCaretPos(mgb, buffer->ownedSelection_id.start[_cursor_index]);
+		int carPos = getCaretPos(mgb, buffer->ownedCarets_id.start[_cursor_index]);
+		ack += abs(selPos - carPos);
+	}
+	
+	return ack;
 }
 
 int cursor_delete_selection(ViewHandle view_handle, int cursor_index)
@@ -646,7 +743,7 @@ Location location_from_iterator(BufferHandle bufferHandle, TextIterator it)
 void **getFunctionInfo(void *handle, void *function)
 {
 	BindingIdentifier bi = { 1, function };
-	void **data;
+	void **data=0;
 	if (lookup(&((CommonBuffer *)handle)->bindingMemory, bi, &data))
 		return data;
 	else
@@ -655,12 +752,14 @@ void **getFunctionInfo(void *handle, void *function)
 
 void *allocateMemory(void *handle, size_t size)
 {
-	return ((CommonBuffer *)handle)->allocator.alloc(size, "user_space_allocation", 0);
+	CommonBuffer *cb = (CommonBuffer *)handle;
+	return cb->allocator.alloc(size, "user_space_allocation", cb->allocator.data);
 }
 
 void  deallocateMemory(void *handle, void *memory)
 {
-	((CommonBuffer *)handle)->allocator.free(memory, 0);
+	CommonBuffer *cb = (CommonBuffer *)handle;
+	cb->allocator.free(memory, cb->allocator.data);
 }
 
 int byteIndexFromLine(BufferHandle buffer_handle, int line)
@@ -673,7 +772,7 @@ int lineFromByteIndex(BufferHandle buffer_handle, int byte_index)
 }
 
 
-TextIterator _mk_it(MGB_Iterator mgbit)
+TextIterator _mk_it(MGB_Iterator mgbit, BufferHandle handle)
 {
 	TextIterator it = {};
 	it.current.block_index = mgbit.block_index;
@@ -681,18 +780,19 @@ TextIterator _mk_it(MGB_Iterator mgbit)
 
 	it.current.sub_index = mgbit.sub_index;
 	it.start.sub_index = mgbit.sub_index;
+	it.buffer_handle = handle;
 	return it;
 }
 TextIterator make(BufferHandle buffer_handle)
 {
 	MultiGapBuffer *mgb = ((BackingBuffer *)buffer_handle)->buffer;
-	return _mk_it(getIterator(mgb));
+	return _mk_it(getIterator(mgb),buffer_handle);
 }
 
 TextIterator make_from_location(BufferHandle buffer_handle, Location loc)
 {
 	BackingBuffer *backingBuffer = ((BackingBuffer *)buffer_handle);
-	return _mk_it(iteratorFromLocation(backingBuffer, loc));
+	return _mk_it(iteratorFromLocation(backingBuffer, loc),buffer_handle);
 }
 
 TextIterator make_from_cursor(ViewHandle view_handle, int cursor_index)
@@ -701,19 +801,98 @@ TextIterator make_from_cursor(ViewHandle view_handle, int cursor_index)
 	assert(cursor_index != ALL_CURSORS && "must supply a specific cursor index to api__iterator.make_from_cursor");
 
 
-	return _mk_it(getIteratorFromCaret(tb->backingBuffer->buffer, tb->ownedCarets_id.start[cursor_index]));
+	return _mk_it(getIteratorFromCaret(tb->backingBuffer->buffer, tb->ownedCarets_id.start[cursor_index]),tb->backingBuffer);
 }
 
-bool nextByte(TextIterator *it, char *out_result_, bool wrap)
+char get_byte(TextIterator it, int dir)
 {
-	return false; //TODO FIXME
+	MGB_Iterator _it = { it.current.block_index, it.current.sub_index };
+	MultiGapBuffer *mgb = ((BackingBuffer *)it.buffer_handle)->buffer;
+	if (dir > 0)
+	{
+		return *getCharacter(mgb, _it);
+	}
+	else
+	{
+		MoveIterator(mgb,&_it, -1);
+		return *getCharacter(mgb,_it);
+	}
 }
+#include "intrin.h"
+#include "stdint.h"
 
-bool nextCodepoint(TextIterator *it, char32_t *out_result, bool wrap)
+char32_t get_codepoint(TextIterator it, int dir)
 {
-	return false; //TODO FIXME
+	//we better not be in the middle of a codepoint
+	MGB_Iterator _it = { it.current.block_index, it.current.sub_index };
+	MultiGapBuffer *mgb = ((BackingBuffer *)it.buffer_handle)->buffer;
+	unsigned char bytes[8];
+	int len = 0;
+	unsigned char *start = 0;
+	if (dir > 0)
+	{
+		bytes[len++] = *getCharacter(mgb, _it);
+		int num_bytes = __lzcnt16((uint16_t)~bytes[0])-8;
+		for (int i = 0; i < num_bytes-1; i++)
+		{
+			MoveIterator(mgb, &_it, 1);
+			bytes[len++] = *getCharacter(mgb, _it);
+		
+		}
+			 
+		start = bytes;
+	}
+	else
+	{
+		for (int i = 0; i < 8; i++)
+		{
+			MoveIterator(mgb, &_it, -1);
+			++len;
+			bytes[sizeof(bytes) - len] = *getCharacter(mgb, _it);
+			int num_lo = __lzcnt16((uint16_t)~bytes[sizeof(bytes) - len]) - 8;
+			if (num_lo == 0 || num_lo != 1) goto success;
+		}
+		assert(false && "tried to read utf-8 larger than 8 bytes long ...");
+		success:
+		start = &bytes[sizeof(bytes)-len];
+	}
+
+
+	char32_t result = 0;
+
+	for (int i = 0; i < len; i++)
+	{
+		if (i == 0)
+		{
+			if (len == 1)
+			{
+				result = bytes[0] & 0x7f;
+			}
+			else
+			{
+				result = (bytes[0] << (len + 1)) >> (len + 1);
+			}
+		}
+		else
+		{
+			result = (result << 6) | ((bytes[i] << 2) >> 2);
+		}
+	}
+	return result;
 }
 
+int move(TextIterator *it, int direction, API_MoveMode mode, bool wrap)
+{
+	MultiGapBuffer *mgb = ((BackingBuffer *)it->buffer_handle)->buffer;
+	switch (mode)
+	{
+	case move_mode_byte:
+		return MoveIterator(mgb, (MGB_Iterator*)it, direction); //TODO return correct amount
+		break;
+	}
+	assert(false);
+	return 0;
+}
 
 
 // --- Markup
@@ -796,7 +975,9 @@ void set_initial_rendering_state(void *view_handle, RenderingState state)
 
 void *createFromFile(char *path, int path_length)
 {
-	DHSTR_String path_str = DHSTR_makeString_(path, path_length);
+	DHSTR_String _tmp = DHSTR_makeString_(path, path_length);
+	DH_Allocator macro_used_allocator = default_allocator;
+	DHSTR_String path_str = DHSTR_CPY(_tmp, ALLOCATE);
 	bool success;
 	TextBuffer buffer = openFileIntoNewBuffer(path_str, &success);
 	if (success)
@@ -887,13 +1068,13 @@ API getAPI()
 	api.callbacks.bindKey_mods = callbacks_bind_key_mods;
 	api.callbacks.registerCallBack = callbacks_register_callback;
 
-	api.handles.getActiveBufferHandle = getActiveViewHandle;	 // does not include the commandline, may return null if no buffer is open
+	api.handles.getActiveViewHandle = getActiveViewHandle;	 // does not include the commandline, may return null if no buffer is open
 	api.handles.getFocusedViewHandle = getFocusedViewHandle;    // includes the commandline
 	api.handles.getCommandLineViewHandle = getCommandLineViewHandle;
 	api.handles.getViewHandleFromIndex = getViewHandleFromIndex;
 	api.handles.getActiveBufferHandle = getActiveBufferHandle;	 // does not include the commandline, may return null if no buffer is open
 	api.handles.getFocusedBufferHandle = getFocusedBufferHandle;    // includes the commandline
-	api.handles.getCommandLineViewHandle = getCommandLineBufferHandle;
+	api.handles.getCommandLineBufferHandle = getCommandLineBufferHandle;
 	api.handles.getBufferHandleFromViewHandle = getBufferHandleFromViewHandle;
 
 	api.Location.from_iterator = location_from_iterator;
@@ -909,8 +1090,11 @@ API getAPI()
 	api.text_iterator.make = make;
 	api.text_iterator.make_from_cursor = make_from_cursor;
 	api.text_iterator.make_from_location = make_from_location;
-	api.text_iterator.nextByte = nextByte;
-	api.text_iterator.nextCodepoint= nextCodepoint;
+	api.text_iterator.move = move;
+	api.text_iterator.get_byte= get_byte;
+	api.text_iterator.get_codepoint= get_codepoint;
+
+
 		
 	api.markup.background_color = background_color;
 	api.markup.font = font;

@@ -21,7 +21,6 @@ struct BufferHandle
 #endif
 
 
-
 enum HandleType
 {
 	handle_type_view,
@@ -37,8 +36,10 @@ struct TextIterator
 {
 	struct
 	{
-		int block_index, sub_index;
+		int block_index;
+		int sub_index;
 	}current,start;
+	BufferHandle buffer_handle;
 };
 
 
@@ -122,13 +123,15 @@ struct API
 	
 	struct
 	{
-		bool (*moveWhile)(ViewHandle view_handle, int direction, int cursor_index, bool select, bool(*function)(char character, int *state));
-		bool (*removeWhile)(ViewHandle view_handle, int direction, int cursor_index, bool(*function)(char character, int *state));
-		int (*move)(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode);
+		bool (*moveWhile)(ViewHandle view_handle, int direction, int cursor_index, bool select, bool(*function)(char character, void **user_data));
+		bool (*removeWhile)(ViewHandle view_handle, int direction, int cursor_index, bool(*function)(char character, void **user_data));
+		int  (*move)(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode);
+		char (*get_byte)(ViewHandle handle, int cursor_index, int direction);
+		char32_t (*get_codepoint)(ViewHandle handle, int cursor_index, int direction);
 
 		bool (*moveToLocation)(ViewHandle view_handle, int cursor_index, bool select, int line, int column);
 
-		int (*add)(ViewHandle view_handle, int line, int column);
+		int  (*add)(ViewHandle view_handle, int line, int column);
 		bool (*remove)(ViewHandle view_handle, int cursor_index);
 
 		void (*append_codepoint)(ViewHandle view_handle, int cursor_index, int direction, char32_t character);
@@ -188,8 +191,9 @@ struct API
 		TextIterator (*make)(BufferHandle buffer_handle);
 		TextIterator (*make_from_location)(BufferHandle buffer_handle,Location loc);
 		TextIterator (*make_from_cursor)(BufferHandle buffer_handle, int cursor);
-		bool     (*nextByte)(TextIterator *it, char *out_result_, bool wrap);
-		bool     (*nextCodepoint)(TextIterator *it, char32_t *out_result, bool wrap);
+		char (*get_byte)(TextIterator it, int direction);
+		char32_t (*get_codepoint)(TextIterator it, int direction);
+		int(*move)(TextIterator *it, int direction, API_MoveMode mode, bool wrap);
 	}text_iterator;
 
 	struct
@@ -221,7 +225,7 @@ struct API
 	}clipboard;
 };
 
-API getAPi();
-#include "api.cpp"
+//API getAPi();
+//#include "api.cpp"
 
 #endif

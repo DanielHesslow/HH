@@ -18,8 +18,6 @@ enum Direction
 	dir_left,
 };
 
-
-
 struct HistoryEntry
 {
 	Action action;
@@ -75,18 +73,6 @@ enum HistoryChangeType
 	HistoryChange_undo,
 };
 
-enum BufferChangeAction
-{
-	buffer_change_add,
-	buffer_change_remove,
-};
-
-struct BufferChange
-{
-	BufferChangeAction action;
-	char character; // should be char32_t but for now I don't want to dig into that.
-	Location location;
-};
 
 DEFINE_DynamicArray(BufferChange);
 

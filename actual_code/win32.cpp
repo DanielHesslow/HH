@@ -519,16 +519,15 @@ WinMain(HINSTANCE instance,
 	data.commandLine = buffer;
 	data.activeTextBufferIndex = 0;
 	data.menu = DHDS_constructDA(MenuItem, 50,default_allocator);
-	Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
-	Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
+	//Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
+	//Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
 
-	data.layout = CREATE_LAYOUT(layout_type_y, 2, split_a, .5, split_b);
+	data.layout = CREATE_LAYOUT(layout_type_y, 2, leaf, .5, leaf);
 	uint16_t timeSinceStartUpInMs;
 		
 	//test_binsumtree_();
 	if (window)
 	{
-
 		Input input = {};
 
 		MSG message;

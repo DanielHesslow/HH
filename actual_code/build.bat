@@ -22,7 +22,7 @@ set buildmode=.%1
 
 pushd ..\..\build
 
-set flags=-Z7 -Femain.exe ..\HH\actual_code\win32.cpp user32.lib gdi32.lib
+set flags=-Zi -Femain.exe /INCREMENTAL:NO ..\HH\actual_code\win32.cpp user32.lib gdi32.lib 
 
 :Loop
 SHIFT
@@ -51,7 +51,6 @@ if %buildmode%==.r (
 )
 
 if %err% == 0 (
-	copy "w:\build\main.exe" "w:\build\mainRunning.exe"
-	 w:\build\mainRunning.exe
+	 start w:\build\main.exe
 )
 popd 

@@ -239,3 +239,7 @@ internal void cut(TextBuffer *textBuffer)
 	}
 	removeSelection(textBuffer); //remove row.
 }
+
+
+#undef push
+#undef pop

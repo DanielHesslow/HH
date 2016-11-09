@@ -1,63 +1,15 @@
----asdasda----
-aksldasssasdkkbajd
-
-
-asdasd
-
-
-
-
-
-asdasdasdasdasdasaaaaaa
-asdasd
-asd
-asdasd
-so there we go again :)
+// --- TODOnormal texteditor stuff:
+    undo (with multigapbuffer things)    redo copy paste is not working again right??history events + tree structure?// --- TODO
+history
+syntax highlighting (lexer)
+opt_out, append without set pref_x 	referene count backingbuffer 
+// --- Plan:
+    // get back to normal.
+          // tabbing and auto indent.          // syntax highlighting.           // history. Make history event's work as intended while we're at it.          // also make history bahave right. It really doesn't.
+    // make it possbile to have view characters replaced. 
+    // Compile buffer -> chase errors. (fun)	// continue parsing do diff lexing and implement autocomplete	// start handling files better...	// redo smooth scrolling. page up/down won't work with the current way. Neither will scrolling. (actually it scrolls like sublime does... which i donno is good)	// openFileCommand need to open up right.	// alignment    //make the parser actually work. 	// make the parser survive bad code 		// no need to panic and die...		//also you know. maybe make it work without leaking to death from time to time...		// seams like comments and shit is fucked up..	    // make rendering with lexer backing possible? (!) 	// make the mouse useable.    // clean up menu things.	// inactivate the old lexer. it is dead althoiugh not replaced.	// redo the commandline to jump down on the current screen (settings)?	// the allocator is a bit fucked in the head. a bit less so now but still though.	// be able to specify movement speed (needn't be the same as char-key-repetition) long term. not really neccessary. 	// add default font and make it possible to spcify which one we're using.    // add settings.    // implement the multigapbuffer thing.			// improve the allocator in bug finding 	// preferedX is set globally not cursor specific as it should be.//--- Bugs    copy empty line crashes.	paste also crashes when we try to paste wierd shit..	if we go more than ~5 folders deep we get a free non-alloced memory error	    I have no fucking clue why. seams to have somehting to do with the folder name length as well..	    look into it.                don't see it anymore though... (have I accidentally fixed it?)	selections removes things sticking down from above lines		ie. j -> ~i;						    caret pos is not updated on char append, only on caret move. That sucks.    ceate files isn't working     history isn't working.    opening empty files?// --- Pre Release// handle lineendings as one should... I'm just using \n for now... (unix) not \r\n (windows). Is this ok?// --- Copy paste// copy:	//grab the selection if there is one.	// otherwise grab the row//paste:	// if there was a seleciton paste it at cursor	// otherwise paste it on the previous line... (isch) // this behaviour is mildly inconsisten and I don't like it.	// however we need to follow conventions. So i'll do it anyway. We cannot fuck up copy pase.	//maybe add a control-shift paste that does what i'd expect it to do?// --- Until usable:	// intellisence.		//which implies:			//preprocessor working			//saving the name of the tokens						//hashmap//--- look into//line endings	// we're just using \n now. Maybe we should do \r\n on windows?	//donno what others are doing.// --- Preprocessor:	this should be implemented at some point.	c-preprocessor-directives:		#define		#include		#undef		#ifdef		#ifndef		#if		#else		#elseif		#endif		#error  //ignore		#line    //ignore	Autocomplete:	input word called i	alternative words called aw		aw is truncated to i.length	it is then compared with levenshtein distance	weigh with most previously used		case should matter but not greatly.	should be context awere (ie. dont suggest things that does not make sence)		parser should compare the hashes 	(if released it should be aware that hahses may collide and do a real strcmp)	colorchange works in the same way.		with these requrements a token must contain	a hash (for quick lookup) (mabe computed later if needed)	a real string.	a meta-type? (function struct keyword etc.)	a position (ie character number 100 in file q.abc)	maybe precomputed values to speed up lev-dist 		lets not preoptimize. Not sure we even have any speed  conserns...		tokens own the string
+	getting up the command line in release mode does not work... so that sux....			remvoe first word on the command line is not wokring.	What makes the command line differnet?	Daniels code guide:	//functions that return success should be a pointer ie.	bool success;	Result result = failingfuncCall(&success);	if(success)	{		}		//because while the following:	Result result;	if(failingfunCall(&result))	{			}		is shorter you might forgett that it can fail and call.
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	filingfuncCall(&result);		and thus ignoring if it failed or not. I've done it and I don't like it.Its just one of the ways I've done wrong so I better fix it.--- Questionshow do we handle move right quickly followed by up? prefered_x should not be set in the renderer...aaa

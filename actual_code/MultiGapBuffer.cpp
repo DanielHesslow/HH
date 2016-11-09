@@ -190,8 +190,17 @@ bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it)
 
 bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
 {
+	MGB_Iterator before = *it;
 	it->sub_index += direction;
-	return pushValid(buffer, it);
+	if (pushValid(buffer, it))
+	{
+		return true;
+	}
+	else
+	{
+		*it = before;
+		return false;
+	}
 }
 
 int getCodepoint(MultiGapBuffer *buffer, MGB_Iterator it, char32_t *code_point)

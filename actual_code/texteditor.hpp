@@ -59,6 +59,8 @@ void* __cdecl _alloca(_In_ size_t _Size);
 #include "ClipBoard.hpp"
 #include "History.cpp"
 
+ColorScheme active_colorScheme = default_colorScheme;
+
 internal int getLineFromIterator(TextBuffer *buffer, MGB_Iterator it);
 internal CharRenderingInfo renderingStateFromLine(TextBuffer *buffer, int line);
 internal int getLineStart(BackingBuffer *backingBuffer, int line);
@@ -1020,6 +1022,7 @@ internal bool can_break_grapheme_cluster(char32_t codepoint_a, char32_t codepoin
 
 	return true;
 }
+
 internal int bytes_of_grapheme_cluster(int cursorId, MultiGapBuffer *mgb, Direction dir)
 {
 	return bytes_of_codepoint(cursorId, mgb, dir);
@@ -1157,8 +1160,9 @@ internal char charAtDirOfCaret(MultiGapBuffer *buffer, Direction dir,int caretId
 	return *get(buffer, caretId, dir);
 }
 
-internal bool whileWord(char character, int *state)
+internal bool whileWord(char character, void **_state)
 {
+	int *state = (int *)_state;
 	if (*state == 0)
 	{
 		if (!isSpace(character))
@@ -1521,10 +1525,11 @@ internal bool openFileIntoNewBackingBuffer(BackingBuffer **_out_backingBuffer, D
 internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int initialHistoryEntrySize)
 {
 	DH_Allocator allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "BackingBuffer arena"));
+	DH_Allocator allocator_user = arena_allocator(allocateArena(KB(64), platform_allocator, "BackingBuffer user arena"));
 	BackingBuffer *buffer = (BackingBuffer *)Allocate(allocator, sizeof(BackingBuffer), "textBuffer: backingBuffer");
 	*buffer = {};
-	buffer->commonBuffer.allocator = allocator;
 	MultiGapBuffer *stringBuffer = (MultiGapBuffer *)Allocate(allocator, sizeof(MultiGapBuffer), "multi gap buffer");
+	buffer->allocator = allocator;
 	*stringBuffer = createMultiGapBuffer(initialMultiGapBufferSize);
 	History history = {};
 	history.entries = constructDynamicArray_HistoryEntry(initialHistoryEntrySize, "history", allocator);
@@ -1533,14 +1538,13 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 	history.events = ORD_constructDynamicArray_HistoryEventMarker(initialHistoryEntrySize, "history event markers", allocator);
 	buffer->history = history;
 	buffer->buffer = stringBuffer;
+	buffer->commonBuffer.allocator = allocator_user;
 	buffer->commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
 	buffer->binding_next_change = DHDS_constructHT(PVOID, HistoryChangeTracker, 20, allocator);
 	buffer->ref_count = 0;
 	initLineSumTree(buffer, allocator);
 	return buffer;
 }
-
-
 
 typedef BackingBuffer *PBackingBuffer;
 
@@ -1564,7 +1568,8 @@ void detach_BackingBuffer(TextBuffer *textBuffer)
 	{
 		bool hasRemoved;
 		remove(&open_files, backingBuffer->path, &hasRemoved);
-		arena_deallocate_all(backingBuffer->commonBuffer.allocator); // including the actual backingBuffer. Nifty.
+		arena_deallocate_all(backingBuffer->commonBuffer.allocator); 
+		arena_deallocate_all(backingBuffer->allocator); // including the actual backingBuffer. Nifty.
 	}
 	textBuffer->backingBuffer = (BackingBuffer *)0;
 }
@@ -1742,6 +1747,7 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 {
 	//hold on are we not using the provided allocator???
 	DH_Allocator allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "textBuffer arena"));
+	DH_Allocator allocator_user = arena_allocator(allocateArena(KB(64), platform_allocator, "textBuffer user arena"));
 	TextBuffer textBuffer = {};
 	textBuffer.allocator = allocator;
 	textBuffer.initial_rendering_state.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
@@ -1760,8 +1766,8 @@ internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLi
 	textBuffer.contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook, 20, allocator);
 	textBuffer.renderingModifiers= DHDS_constructDA(RenderingModifier,20, allocator);
 	textBuffer.commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
+	textBuffer.commonBuffer.allocator = allocator_user;
 	textBuffer.rendering_changes = DHDS_ORD_constructDA(CharRenderingChange, 20, allocator);
-
 	return textBuffer;
 }
 
@@ -1819,6 +1825,7 @@ internal void freeTextBuffer(TextBuffer buffer)
 	if(buffer.backingBuffer)
 		detach_BackingBuffer(&buffer);
 	arena_deallocate_all(buffer.allocator);
+	arena_deallocate_all(buffer.commonBuffer.allocator);
 }
 
 internal void closeTextBuffer(Data *data)
@@ -1884,8 +1891,8 @@ internal void saveFile_PLATFORM(MultiGapBuffer *buffer, DHSTR_String path)
 		for (int i = 0; i < buffer->blocks.length; i++)
 			if (buffer->blocks.length != 0)
 				fwrite(start_of_block(buffer,i), sizeof(char), length_of_block(buffer,i), file);
+		fclose(file);
 	}
-	fclose(file);
 }
 
 
@@ -2640,9 +2647,9 @@ internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startL
 	}
 }
 
-
-internal void mark_selection(TextBuffer *textBuffer)
+internal void mark_selection(void *view_handle)
 {
+	TextBuffer *textBuffer = (TextBuffer *)view_handle;
 	if (has_move_changed(textBuffer->backingBuffer, &mark_selection))
 	{
 		remove_rendering_changes(textBuffer, &mark_selection);
@@ -2661,7 +2668,6 @@ internal void mark_selection(TextBuffer *textBuffer)
 			}
 		}
 	}
-	
 }
 
 
@@ -2875,11 +2881,12 @@ internal int calculateVisibleLines(TextBuffer *textBuffer, Bitmap bitmap, int li
 	}
 	return counter - 1;
 }
-
+#if 0
 inline float abs(float f)
 {
 	return f >= 0 ? f : -f;
 }
+#endif
 
 internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,bool drawCaret)
 {
@@ -2891,7 +2898,7 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 	float diff = (targetY - textBuffer->lastWindowLineOffset);
 	int LH_q = lineHeightFromLine(textBuffer, textBuffer->lastWindowLineOffset);
 	float speed = 1.5 / LH_q; // *dt ain't right when (int)(winoffset) != (int)(winoffset+dy)... It jumps 
-	float dy = abs(diff) > speed ? diff * speed : diff;
+	float dy = fabs(diff) > speed ? diff * speed : diff;
 	
 	int caretX = textBuffer->ownedCarets_id.length > 0 ? getPreferedCaretX(textBuffer, 0) : 0; //@BUGS we should not just take the first index ...
 	int min = -caretX+ 40; 
@@ -2907,7 +2914,7 @@ internal void updateText(TextBuffer *textBuffer, Bitmap bitmap, int x, int y,boo
 		targetX = clamp(textBuffer->dx, min, max);
 	}
 	float diffx = (targetX - textBuffer->dx);
-	int dx = abs(diffx) > 0.1 ? diffx * 0.2 : diffx;
+	int dx = fabs(diffx) > 0.1 ? diffx * 0.2 : diffx;
 	textBuffer->dx += dx;
 	float firstScale = scaleFromLine(textBuffer, textBuffer->lastWindowLineOffset);
 	int firstLH = lineHeightFromLine(textBuffer, textBuffer->lastWindowLineOffset);
@@ -3017,15 +3024,24 @@ internal bool stripInitialWhite(MultiGapBuffer *buffer, MGB_Iterator *it, int *c
 	return true;
 }
 
-#include "bindings.hpp"
+//this one should come from the dll
+struct API;
+
+void(*setBindingsLocal)(API api, void *view_handle);
+#include "api.cpp"
+
+//#include "bindings.cpp"
 
 internal void initTextBuffer(TextBuffer *textBuffer)
 {
+	
 	int caret_i = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedCarets_id, caret_i);
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
 	_setLocalBindings(textBuffer);
+	getAPI().callbacks.registerCallBack(callback_pre_render, textBuffer, mark_selection);
+
 }
 
 internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
@@ -3187,6 +3203,8 @@ internal void renderTree(Bitmap bitmap, void *node, int offX, int offY, Typeface
 internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool isActive, bool drawCaret)
 {//@improve me... this api is not ok.
 	
+
+
 	if (buffer->bufferType == regularBuffer)
 	{
 		//if(colorIsDirty)
@@ -3509,11 +3527,68 @@ void render_and_advance(Bitmap bitmap, char **ptr)
 		renderText(bitmap, DHSTR_MAKE_STRING(buffer), scale, (int)active_colorScheme.active_color, 1, 0, f);
 	}
 }
+
+
+void reload_textBuffer(TextBuffer *textBuffer)
+{
+	arena_deallocate_all(textBuffer->commonBuffer.allocator);
+	arena_deallocate_all(textBuffer->backingBuffer->commonBuffer.allocator);
+	textBuffer->backingBuffer->commonBuffer.allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "BackingBuffer user arena"));
+	textBuffer->commonBuffer.allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "TextBuffer user arena"));
+	textBuffer->renderingModifiers.length = 0;
+	textBuffer->KeyBindings.length = 0;
+	clear(&textBuffer->commonBuffer.bindingMemory);
+	clear(&textBuffer->backingBuffer->commonBuffer.bindingMemory);
+	_setLocalBindings(textBuffer);
+	getAPI().callbacks.registerCallBack(callback_pre_render, textBuffer, mark_selection);
+	textBuffer->rendering_changes.length = 0;
+}
+
+
+void reload_dll()
+{
+	static uint64_t last_dll_time = 0;
+	{//loading bindings api
+	 //windows code...
+		HANDLE hfile = CreateFile("Bindings.dll", GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE| FILE_SHARE_DELETE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+		FILETIME time;
+		GetFileTime(hfile, 0, 0, &time);
+		ULARGE_INTEGER ull;
+		ull.HighPart = time.dwHighDateTime;
+		ull.LowPart = time.dwLowDateTime;
+		uint64_t dll_time = (uint64_t)ull.QuadPart;
+		CloseHandle(hfile);
+		if (dll_time != last_dll_time)
+		{
+			static HMODULE DLL=0;
+			if (DLL)FreeLibrary(DLL);
+
+			commands.length = 0;
+			while (!CopyFile("Bindings.dll", "Bindings_tmp.dll", false));
+			int err = GetLastError();
+
+			DLL = LoadLibrary("Bindings_tmp.dll");
+			setBindingsLocal = (void(*)(API, void *))GetProcAddress(DLL, "setBindingsLocal");
+
+			ColorScheme(*get_colorScheme)() = (ColorScheme(*)())GetProcAddress(DLL, "get_colorScheme");
+			active_colorScheme = get_colorScheme();
+			for (int i = 0; i < global_data->textBuffers.length; i++)
+			{
+				reload_textBuffer(&global_data->textBuffers.start[i]);
+			}
+			reload_textBuffer(global_data->commandLine);
+			last_dll_time = dll_time;
+		}
+	}
+}
+
+
 Layout *leaf = (Layout *)0;
 internal void renderFrame(Data *pdata, Bitmap bitmap, uint64_t microsStart)
 {
 	Data data = *pdata;
 	global_data = pdata;
+	reload_dll();
 	local_persist bool wasCommandLineActive = false;
 	if (data.updateAllBuffers || wasCommandLineActive||true)
 	{

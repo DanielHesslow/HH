@@ -1,5 +1,5 @@
-
-
+#ifndef H_COLORSCHEME
+#define H_COLORSCHEME
 struct ColorScheme
 {
 	Color *background_colors;
@@ -13,13 +13,13 @@ Color _foregroundColor = rgb(.8f,.8f,.8f);
 
 Color _caret_light = rgb(.1f,.6f,.8f);
 Color _caret_dark = rgb(.2f,.3f,.8f );
-Color _active_color = hsl(.09,.9f,.5);
+Color _active_color = hsl(.05f,.8f,.5);
 
 float _s = .4;
 float _i = .1;
 Color _backgroundColors[] = { hsl(1.0 / 2.0,_s,_i), hsl(1.0/3.0,_s,_i), hsl(4.0 / 5.0,_s,_i) };
 
-global_variable ColorScheme active_colorScheme = 
+static ColorScheme default_colorScheme = 
 {
 	_backgroundColors,
 	3,
@@ -30,3 +30,4 @@ global_variable ColorScheme active_colorScheme =
 	_active_color
 };
 
+#endif
