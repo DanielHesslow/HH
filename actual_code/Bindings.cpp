@@ -37,24 +37,82 @@ internal void preFeedOpenFile()
 	char buffer[] = u8"openFile ";
 	preFeedCommandLine(buffer, (sizeof(buffer) / sizeof(buffer[0]) - 1));
 }
+#include "ctype.h"
 
-void _moveLeft(Mods mods) //probably just allow the user to request this?
+
+void _delete(Mods mods, int direction)
 {
 	void *handle = api.handles.getFocusedViewHandle();
-	//if (mods & mod_control) api.cursor.moveWhile(handle, -1, ALL_CURSORS, mods & mod_shift, &whileWord);
-	//else 
-	api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift, move_mode_grapheme_cluster);
+	bool deleted = false;
+	if (mods & mod_control)
+	{
+		FOR_CURSORS(cursor, api, handle)
+		{
+			if (api.cursor.selection_length(handle, cursor))
+			{
+				api.cursor.delete_selection(handle, cursor);
+			}
+			else
+			{
+				char byte;
+				while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && isspace(byte) && byte != '\n')
+				{
+					api.cursor.remove_codepoint(handle, cursor, direction);
+					deleted = true;
+				}
+				while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && !isspace(byte))
+				{
+					api.cursor.remove_codepoint(handle, cursor, direction);
+					deleted = true;
+				}
+			}
+		}
+	}
+	if (!deleted)
+	{
+		FOR_CURSORS(cursor, api, handle)
+			api.cursor.remove_codepoint(handle, cursor, direction);
+	}
 }
+
+void _move(Mods mods, int direction)
+{
+	void *handle = api.handles.getFocusedViewHandle();
+	bool moved = false;
+	if (mods & mod_control)
+	{
+		FOR_CURSORS(cursor, api, handle)
+		{
+			char byte;
+			while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && isspace(byte) && byte != '\n')
+			{
+				api.cursor.move(handle, direction, cursor, mods & mod_shift, move_mode_codepoint);
+				moved = true;
+			}
+			while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && !isspace(byte))
+			{
+				api.cursor.move(handle, direction, cursor, mods & mod_shift, move_mode_codepoint);
+				moved = true;
+			}
+		}
+	}
+	if (!moved)
+	{
+		FOR_CURSORS(cursor, api, handle)
+			api.cursor.move(handle, direction, cursor, mods & mod_shift, move_mode_grapheme_cluster);
+	}
+}
+
+
 
 void _moveRight(Mods mods)
 {
-	void *handle = api.handles.getFocusedViewHandle();
-	//if (mods & mod_control) api.cursor.moveWhile(handle, 1, ALL_CURSORS, mods & mod_shift, &whileWord);
-	//else 
-	api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift, move_mode_grapheme_cluster);
+	_move(mods, 1);
 }
-
-
+void _moveLeft(Mods mods)
+{
+	_move(mods, -1);
+}
 
 
 
@@ -73,44 +131,13 @@ void _moveDown(Mods mods)
 
 void _backSpace(Mods mods)
 {
-	void *handle = api.handles.getFocusedViewHandle();
-	int number_of_cursors = api.cursor.number_of_cursors(handle);
-	for (int i = 0; i < number_of_cursors; i++)
-	{
-		if (api.cursor.selection_length(handle, i))
-		{
-			api.cursor.delete_selection(handle, i);
-		}
-		else
-		{
-			//if (mods & mod_control)
-				//api.cursor.removeWhile(handle, -1, i, &whileWord);
-			//else
-				api.cursor.remove_codepoint(handle, i, -1);
-
-		}
-	}
+	_delete(mods, -1);
 }
 
 
 void _delete(Mods mods)
 {
-	void *handle = api.handles.getFocusedViewHandle();
-	int number_of_cursors = api.cursor.number_of_cursors(handle);
-	for (int i = 0; i < number_of_cursors; i++)
-	{
-		if (api.cursor.selection_length(handle, i))
-		{
-			api.cursor.delete_selection(handle, i);
-		}
-		else
-		{
-			//if (mods & mod_control)
-				//api.cursor.removeWhile(handle, -1, i, &whileWord);
-			//else
-				api.cursor.remove_codepoint(handle, i, 1);
-		}
-	}
+	_delete(mods, 1);
 }
 
 #if 0
@@ -326,75 +353,6 @@ internal void insertCaretBelow(TextBuffer *buffer)
 {
 	insertCaret(buffer, below);
 }
-
-internal void win32_runBuild(Data *data) //this is *highly* platform dependant. Should be moved to win32.cpp
-{	//and refactor out the openfile into buffeer into its own win32 function.
-
-	//check for leakages... This is just thrown together!
-	SECURITY_ATTRIBUTES atributes = {};
-	atributes.nLength = sizeof(atributes);
-	atributes.bInheritHandle = true;
-	atributes.lpSecurityDescriptor = 0; // makes sure this is OK!
-	HANDLE readPipe;
-	HANDLE writePipe;
-	if (CreatePipe(&readPipe, &writePipe, &atributes, 0))
-	{
-		STARTUPINFO si = {};
-		si.cb = sizeof(si); //like why do we need to do this microsoft.. why? is this sturct variable size or what?
-		si.hStdOutput = writePipe;										//appearently because they like to change the struct without it breaking shit
-		si.hStdError = writePipe;										//all right i guess...
-		si.dwFlags = STARTF_USESTDHANDLES;
-
-		PROCESS_INFORMATION pi; // I like the naming consistency, why isn't this called PROCESSINFO
-		char proc[] = "cmd.exe  /C W:\\HH\\CodeWorking\\build.bat";
-
-		if (CreateProcess(0, proc, 0, 0, true, CREATE_UNICODE_ENVIRONMENT, 0, 0, &si, &pi))
-		{
-			//we should maybe not wait here, just lock this buffer?
-			//this might take some time and should freeze us!
-
-			//from msdn, do it:
-			//Use caution when calling the wait functions and code that directly or indirectly creates windows.
-			//If a thread creates any windows, it must process messages.Message broadcasts are sent to all windows in the system.
-			//A thread that uses a wait function with no time - out interval may cause the system to become deadlocked.
-			//Two examples of code that indirectly creates windows are DDE and the CoInitialize function.
-			//Therefore, if you have a thread that creates windows, use MsgWaitForMultipleObjects or MsgWaitForMultipleObjectsEx, rather than WaitForSingleObject.
-
-			WaitForSingleObject(pi.hProcess, INFINITE);
-			CloseHandle(pi.hProcess);
-			CloseHandle(pi.hThread);
-		}
-		else
-		{
-			//todo handle and log
-			assert(false);
-		}
-	}
-	else
-	{
-		//todo handle and log
-		assert(false);
-	}
-
-	char buffer[200000];
-	DWORD len;
-	ReadFile(readPipe, buffer, 200000, &len, 0);
-	TextBuffer textBuffer = allocTextBuffer(20000, 2000, 2000, 2000);
-	for (int i = 0; i < len; i++)
-	{
-		appendCharacter(&textBuffer, buffer[i], false);
-	}
-	initTextBuffer(&textBuffer);
-
-	DH_Allocator macro_used_allocator = default_allocator; //used below. I try to avoid lambdas when possible
-	textBuffer.fileName = DHSTR_CPY(DHSTR_MAKE_STRING("Build_Log"), ALLOCATE); //BLAHA MALLOC
-	Add(&data->textBuffers, textBuffer);
-	//data->activeTextBufferIndex = data->textBuffers.length - 1;
-	data->updateAllBuffers = true;
-	CloseHandle(readPipe);
-	CloseHandle(writePipe);
-}
-
 #endif
 
 internal void openFileCommand(char *start, int length, void **user_data)
@@ -532,6 +490,8 @@ internal void addDirFilesToMenu(Data *data, DHSTR_String path, DHSTR_String *_ou
 	}
 }
 #endif
+
+
 #if 0
 void _cloneBuffer(Data *data)
 {
@@ -833,12 +793,27 @@ internal void setActive(Data *data, int index)
 #define VK_RETURN 0x0D
 #define VK_ESCAPE 0x1B
 
+
+void dir()
+{
+	char *cmd = "dir";
+	void *buffer_handle = api.misc.openRedirectedCommandPrompt(cmd,strlen(cmd));
+	api.view.createFromBufferHandle(buffer_handle);
+}
+
+
+void moveDownMenu()
+{
+	
+}
+
+
 //#include "windows.h"
 extern "C"
 {
 	__declspec(dllexport) ColorScheme get_colorScheme()
 	{
-		default_colorScheme.active_color = hsl(0.5f,0.3f,0.3f);
+		default_colorScheme.active_color = hsl(0.7f,0.3f,0.3f);
 		return default_colorScheme;
 	}
 
@@ -859,7 +834,7 @@ extern "C"
 
 		if (api.view.get_type(view_handle) == (int)buffer_mode_defualt)
 		{
-
+			api.callbacks.bindKey(view_handle, 'D', precisely, mod_control, []() {dir(); });
 			api.callbacks.bindKey_mods(view_handle, VK_UP, atMost, mod_shift, _moveUp);
 			api.callbacks.bindKey_mods(view_handle, VK_DOWN, atMost, mod_shift, _moveDown);
 			api.callbacks.bindKey(view_handle, 'S', precisely, mod_control, []() {api.buffer.save(api.handles.getActiveViewHandle()); });
@@ -878,8 +853,8 @@ extern "C"
 		else if (api.view.get_type(view_handle) == (int)buffer_mode_commandline)
 		{
 			api.callbacks.bindKey(view_handle, VK_RETURN, atLeast, mod_none, api.commandLine.executeCommand);
-			//api.callbacks.bindKey(view_handle, VK_DOWN, precisely, mod_none, moveDownMenu);
-			//api.callbacks.bindKey(view_handle, VK_UP, precisely, mod_none, moveUpMenu);
+			api.callbacks.bindKey(view_handle, VK_DOWN, precisely, mod_none, []() {api.misc.move_active_menu(1)});
+			api.callbacks.bindKey(view_handle, VK_UP, precisely, mod_none, []() {api.misc.move_active_menu(-1)});
 			api.callbacks.bindKey(view_handle, VK_ESCAPE, precisely, mod_none, hideCommandLine);
 
 			api.callbacks.bindCommand("openFile", openFileCommand, 0, 0);

@@ -11,7 +11,6 @@
 
 
 #include <stdint.h>
-#include "platform.h"
 #define DH_MEMSET_IMPLEMENTATION
 #define DH_memset_32 memset_32
 #include "DH_memset_32.h"
@@ -24,10 +23,6 @@ struct DH_Allocator
 	void(*free)(void *mem_to_free, void *data);
 	void *data;
 };
-void *platform_alloc_compat(size_t bytes_to_alloc, void *alloc_info, void *data) { return platform_alloc(bytes_to_alloc); }
-void platform_free_compat(void *mem, void *data) { platform_free(mem); }
-
-DH_Allocator platform_allocator = { platform_alloc_compat,platform_free_compat,0};
 
 #define ALLOC(allocator, bytes) Allocate(allocator,bytes,DHMA_LOCATION)
 void *Allocate(DH_Allocator allocator, size_t bytes_to_alloc, void *allocation_info)
@@ -40,7 +35,7 @@ void DeAllocate(DH_Allocator allocator, void *mem)
 	allocator.free(mem, allocator.data);
 }
 
-#include "malloc.h" //for alloca, lets unlink to all this shit later on. I don't want it.
+#include "malloc.h" //for alloca, lets remove to all this shit later on. I don't want it.
 /*
 void* __cdecl _alloca(_In_ size_t _Size);
 #define alloca _alloca
@@ -58,6 +53,13 @@ void* __cdecl _alloca(_In_ size_t _Size);
 #include "colorScheme.h"
 #include "ClipBoard.hpp"
 #include "History.cpp"
+#include "platform.h"
+
+void *platform_alloc_compat(size_t bytes_to_alloc, void *alloc_info, void *data) { return platform_alloc(bytes_to_alloc); }
+void platform_free_compat(void *mem, void *data) { platform_free(mem); }
+
+DH_Allocator platform_allocator = { platform_alloc_compat,platform_free_compat,0 };
+
 
 ColorScheme active_colorScheme = default_colorScheme;
 
@@ -1421,6 +1423,29 @@ FileEncoding recognize_file_encoding(void *start, size_t len, size_t *_out_lengt
 	return file_encoding_unknown;
 }
 
+
+void initial_mgb_process(MultiGapBuffer *mgb)
+{
+	while (mgb_moveLeft(mgb, mgb->running_cursor_id))
+	{
+		// so the while here is just if somebody has fucked up good.
+		// \r\r\r\r\r\r\n is _most likely_  just somebody mis-using the crt on windows.
+		// fyi crt on windows automatically writes \n as \r\n so if you try to write \r\n you get \r\r\n
+		// for example if you're not using crt to read the file and do use it to write it out.
+
+		char *left = get(mgb, mgb->running_cursor_id, dir_left);
+		char *right = get(mgb, mgb->running_cursor_id, dir_right);
+
+
+		while (*get(mgb, mgb->running_cursor_id, dir_left) == '\r'
+			&& *get(mgb, mgb->running_cursor_id, dir_right) == '\n')
+		{
+			removeCharacter(mgb, mgb->running_cursor_id);
+		}
+
+		if (isLineBreak(*right)) *right = '\n'; // simple linebreak while open.
+	}
+}
 internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int initialHistoryEntrySize);
 
 internal bool openFileIntoNewBackingBuffer(BackingBuffer **_out_backingBuffer, DHSTR_String file_name)
@@ -1501,19 +1526,9 @@ internal bool openFileIntoNewBackingBuffer(BackingBuffer **_out_backingBuffer, D
 	// horrible code btw. but whateves.... for now
 	// this does run through the entire file once. which should be fine even if the file is huge. 
 	// as does the open thing btw. we might want to add a fast path for _hugh_ files. (ie. logfiles)
-	while (mgb_moveLeft(mgb, mgb->running_cursor_id)) 
-	{
-		// so the while here is just if somebody has fucked up good.
-		// \r\r\r\r\r\r\n is _most likely_  just somebody mis-using the crt on windows.
-		// fyi crt on windows automatically writes \n as \r\n so if you try to write \r\n you get \r\r\n
-		// for example if you're not using crt to read the file and do use it to write it out.
+	
+	initial_mgb_process(mgb);
 
-		while(*get(mgb, mgb->running_cursor_id, dir_left) == '\r'
-			&& *get(mgb, mgb->running_cursor_id, dir_right) == '\n')
-		{
-			removeCharacter(mgb, mgb->running_cursor_id);
-		}
-	}
 	// @cleanup relies on the fact that initial index is implicit.
 	DH_Allocator macro_used_allocator = ret->commonBuffer.allocator;
 	ret->path = DHSTR_CPY(file_name, ALLOCATE);
@@ -1563,7 +1578,7 @@ void attatch_BackingBuffer(TextBuffer *textBuffer, BackingBuffer *backingBuffer)
 void detach_BackingBuffer(TextBuffer *textBuffer)
 {
 	BackingBuffer *backingBuffer = textBuffer->backingBuffer;
-	--backingBuffer->ref_count;
+	--(backingBuffer->ref_count);
 	if (!backingBuffer->ref_count)
 	{
 		bool hasRemoved;
@@ -1810,13 +1825,19 @@ internal void removeCaret(TextBuffer *buffer, int caretIdIndex, bool log)
 	RemoveOrd(&buffer->ownedSelection_id, caretIdIndex);
 }
 
-internal TextBuffer cloneTextBuffer(TextBuffer *buffer)
+
+internal TextBuffer createTextBufferFromBackingBuffer(BackingBuffer *backingBuffer, DHSTR_String file_name)
 {
 	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
-	attatch_BackingBuffer(&textBuffer, buffer->backingBuffer);
-	textBuffer.fileName = buffer->fileName; //COPY ME??
+	attatch_BackingBuffer(&textBuffer, backingBuffer);
+	textBuffer.fileName = file_name; //COPY ME??
 	initTextBuffer(&textBuffer); //setting user_specified_bindings + adding the correct cursors
 	return textBuffer;
+}
+
+internal TextBuffer cloneTextBuffer(TextBuffer *buffer)
+{
+	return createTextBufferFromBackingBuffer(buffer->backingBuffer, buffer->fileName);
 }
 
 
@@ -1828,15 +1849,7 @@ internal void freeTextBuffer(TextBuffer buffer)
 	arena_deallocate_all(buffer.commonBuffer.allocator);
 }
 
-internal void closeTextBuffer(Data *data)
-{
-	int index = data->activeTextBufferIndex;
-	TextBuffer textBuffer = data->textBuffers.start[index];
-	freeTextBuffer(textBuffer);
-	Remove(&data->textBuffers, index);
-	data->activeTextBufferIndex = 0;
-	data->updateAllBuffers = true;
-}
+
 
 internal TextBuffer openCommanLine()
 {
@@ -1862,7 +1875,6 @@ internal TextBuffer openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
 	{
 		attatch_BackingBuffer(&textBuffer, bb);
 		textBuffer.fileName = fileName; //WE'RE totaly leaking this.
-		redoLineSumTree(textBuffer.backingBuffer);
 		initTextBuffer(&textBuffer); //setting user_specified_bindings
 		return textBuffer;
 	} else
@@ -2811,46 +2823,97 @@ internal Bitmap drawBorder(Bitmap bitmap, int left, int right, int top, int bott
 	return margin(bitmap, left, right, top, bottom);
 }
 
+
+Rect next_rect_in_grid(Bitmap bitmap, Rect r, int dir_x, int dir_y)
+{
+	r.x += r.width*dir_x;
+	r.y += r.height*dir_y;
+
+	clamp(r.x, 0, bitmap.width);
+	clamp(r.y, 0, bitmap.height);
+	clamp(r.width, 0, bitmap.width - r.x);
+	clamp(r.height, 0, bitmap.height - r.y);
+	return r;
+}
+
+void renderWithLayout(Bitmap bitmap, Layout *layout, char **items_ptr, char *items_end, void(*render_and_advance)(Bitmap bitmap, char **ptr))
+{
+	bool ended = items_end == *items_ptr;
+
+	if (ended)
+	{
+		clearBitmap(bitmap, (int)active_colorScheme.background_colors[0]);
+	}
+
+	if (!layout || layout->number_of_children == 0)
+	{
+		if (!ended) render_and_advance(bitmap, items_ptr);
+		return;
+	}
+
+	int total_width = 0;
+	for (int i = 0; i < layout->number_of_children - 1; i++)
+	{
+		total_width += layout->dividers[i].width;
+	}
+
+	switch (layout->type)
+	{
+	case layout_type_x:
+	{
+		int ack_border_width = 0;
+		float last_rel_pos = 0;
+		int working_width = bitmap.width - total_width;
+		for (int i = 0; i < layout->number_of_children - 1; i++)
+		{
+			int start_px = ack_border_width + last_rel_pos * working_width;
+			last_rel_pos = layout->dividers[i].relative_position;
+			int end_px = ack_border_width + last_rel_pos * working_width;
+			ack_border_width += layout->dividers[i].width;
+			renderRect(bitmap, end_px, 0, layout->dividers[i].width, bitmap.height, (int)active_colorScheme.active_color);
+			renderWithLayout(subBitmap(bitmap, end_px - start_px, bitmap.height, start_px, 0), layout->children[i], items_ptr, items_end, render_and_advance);
+		}
+		int start_px = ack_border_width + last_rel_pos * working_width;
+		int end_px = bitmap.width;
+		renderWithLayout(subBitmap(bitmap, end_px - start_px, bitmap.height, start_px, 0), layout->children[layout->number_of_children - 1], items_ptr, items_end, render_and_advance);
+	}break;
+
+	case layout_type_y:
+	{
+		int ack_border_width = 0;
+		float last_rel_pos = 0;
+		int working_height = bitmap.height - total_width;
+		for (int i = 0; i < layout->number_of_children - 1; i++)
+		{
+			int start_px = ack_border_width + last_rel_pos * working_height;
+			last_rel_pos = layout->dividers[i].relative_position;
+			int end_px = ack_border_width + last_rel_pos * working_height;
+			ack_border_width += layout->dividers[i].width;
+			renderRect(bitmap, 0, end_px, bitmap.width, layout->dividers[i].width, (int)active_colorScheme.active_color);
+			renderWithLayout(subBitmap(bitmap, bitmap.width, end_px - start_px, 0, start_px), layout->children[i], items_ptr, items_end, render_and_advance);
+		}
+		int start_px = ack_border_width + last_rel_pos * working_height;
+		int end_px = bitmap.width;
+		renderWithLayout(subBitmap(bitmap, bitmap.width, end_px - start_px, 0, start_px), layout->children[layout->number_of_children - 1], items_ptr, items_end, render_and_advance);
+	}break;
+
+	case layout_type_z:
+	{
+		for (int i = 0; i < layout->number_of_children; i++)
+		{	//probably don't always need to render on top... Need to handle that.
+			renderWithLayout(bitmap, layout->children[i], items_ptr, items_end, render_and_advance);
+		}
+	}break;
+	}
+
+	layout->last_width = bitmap.width;
+	layout->last_height = bitmap.height;
+}
+
+
+
 internal void renderCommandLine(Bitmap bitmap, Data data)
 {
-#if 0
-	TextBuffer *buffer = data.commandLine;
-	CharRenderingInfo rendering = renderingStateFromLine(buffer, 0);
-	int LH = rendering.font->lineHeight * rendering.scale;
-	int padding = 2;
-	int minWidth = 400;
-	int width = bitmap.width / 2;
-	width = width > minWidth? width : min(minWidth, bitmap.width - padding * 2);
-	int height = LH*1.5;
-	int x = (bitmap.width - width) /2;
-	int y = 0+padding;
-	Rect r = { x,y,width,height};
-	renderRect(bitmap,r, (int)active_colorScheme.background_colors[2]);
-
-	int dec = rendering.font->descent* rendering.scale;
-
-	if (data.menu.length > 0)
-	{
-		for (int i = 0; i < data.menu.length; i++)
-		{
-			y += height;
-			Rect r = { x,y,width,height};
-			Bitmap b = drawBorder(subBitmap(bitmap, r), 0, 0, 1, 0, 0xff999999);
-			//crash??
-			if (data.activeMenuItem-1== i)
-			{
-				clearBitmap(b, (int) active_colorScheme.active_color);
-			}
-			else
-			{
-				clearBitmap(b, (int)active_colorScheme.background_colors[2]);
-			}
-			renderText(b,data.menu.start[i].name,scaleFromLine(buffer,0), (int)active_colorScheme.foregroundColor,0,height-3,rendering.font); // the one here is a bit worrying... 
-		}
-	}
-	renderText(buffer, subBitmap(bitmap, r), 0, 0, height + dec, true);
-#endif
-
 	TextBuffer *buffer = data.commandLine;
 	CharRenderingInfo rendering = renderingStateFromLine(buffer, 0);
 	int LH = rendering.font->lineHeight * rendering.scale;
@@ -2860,12 +2923,18 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 	width = width > minWidth ? width : min(minWidth, bitmap.width - padding * 2);
 	int x = (bitmap.width - width) / 2;
 	int y = 0 + padding;
-	Rect r = { x,y,width,bitmap.height};
-
+	Rect r = { x,y,width,LH};
 	int dec = rendering.font->descent* rendering.scale;
-	
-	renderBackground(buffer,bitmap,0,50,0,true);
+	renderRect(bitmap, r, (int)active_colorScheme.active_color);
 	renderText(buffer, subBitmap(bitmap, r), 0, 0, LH, true);
+	
+	for (int i = 0; i < data.menu.items.length; i++)
+	{
+		MenuItem item = data.menu.items.start[i];
+		r = next_rect_in_grid(bitmap, r, 0, 1);
+		renderRect(bitmap, r, (int)active_colorScheme.background_colors[1]);
+		renderText(subBitmap(bitmap, r),item.name, rendering.scale, rendering.color,0, 0, rendering.font);
+	}
 }
 
 
@@ -3030,18 +3099,17 @@ struct API;
 void(*setBindingsLocal)(API api, void *view_handle);
 #include "api.cpp"
 
-//#include "bindings.cpp"
-
+//TODO Merge reload textbuffer and init?
 internal void initTextBuffer(TextBuffer *textBuffer)
 {
-	
+	redoLineSumTree(textBuffer->backingBuffer);
+
 	int caret_i = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedCarets_id, caret_i);
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
 	_setLocalBindings(textBuffer);
 	getAPI().callbacks.registerCallBack(callback_pre_render, textBuffer, mark_selection);
-
 }
 
 internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
@@ -3545,12 +3613,15 @@ void reload_textBuffer(TextBuffer *textBuffer)
 }
 
 
+
 void reload_dll()
 {
 	static uint64_t last_dll_time = 0;
+	
 	{//loading bindings api
 	 //windows code...
-		HANDLE hfile = CreateFile("Bindings.dll", GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE| FILE_SHARE_DELETE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+		HANDLE hfile = CreateFile("Bindings.dll", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+		
 		FILETIME time;
 		GetFileTime(hfile, 0, 0, &time);
 		ULARGE_INTEGER ull;
@@ -3558,8 +3629,11 @@ void reload_dll()
 		ull.LowPart = time.dwLowDateTime;
 		uint64_t dll_time = (uint64_t)ull.QuadPart;
 		CloseHandle(hfile);
-		if (dll_time != last_dll_time)
+
+		if (last_dll_time != dll_time)
 		{
+			last_dll_time = dll_time;
+		
 			static HMODULE DLL=0;
 			if (DLL)FreeLibrary(DLL);
 
@@ -3577,7 +3651,7 @@ void reload_dll()
 				reload_textBuffer(&global_data->textBuffers.start[i]);
 			}
 			reload_textBuffer(global_data->commandLine);
-			last_dll_time = dll_time;
+
 		}
 	}
 }
@@ -3615,7 +3689,6 @@ internal void renderFrame(Data *pdata, Bitmap bitmap, uint64_t microsStart)
 			
 			renderScreen(textBuffer, subBitmap, 5, 0, true, drawCaret);
 		}
-		
 	}	
 	wasCommandLineActive= data.isCommandlineActive;
 }
@@ -3624,5 +3697,5 @@ internal void renderFrame(Data *pdata, Bitmap bitmap, uint64_t microsStart)
 
 
 #include "Layout.cpp"
-
+#include "platform.cpp"
 

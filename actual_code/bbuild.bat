@@ -22,7 +22,22 @@ set buildmode=.%1
 
 pushd ..\..\build
 
-set flags= /Zi -Femain.exe  ..\HH\actual_code\win32.cpp user32.lib gdi32.lib 
+::IF exist bindings1.dll (
+::set file_name=bindings2
+::del bindings1.*
+::) else (
+::set file_name=bindings1
+::del bindings2.*
+::)
+
+set file_name=bindings
+
+del bindings*.pdb
+
+set t=%time::=%
+set t=%t:.=%
+
+set flags=..\HH\actual_code\bindings.cpp /Zi /EHsc  /Fe%file_name%  /LD /link /INCREMENTAL:NO /PDB:bindings%t%.pdb  
 
 :Loop
 SHIFT
@@ -36,21 +51,23 @@ echo flags: %flags%
 
 
 if %buildmode%==.r (
-	ctime.exe -begin timings_release.ctm
+	ctime.exe -begin timingsdll_release.ctm
 	cl -O2i -DRELEASE %flags%
 ) else (
-	ctime.exe -begin timings_debug.ctm
+	ctime.exe -begin timingsdll_debug.ctm
 	cl -Od -DDEBUG %flags%
 )
 set err=%errorLevel%
 
 if %buildmode%==.r (
-	ctime.exe -end timings_release.ctm %err%
+	ctime.exe -end timingsdll_release.ctm %err%
 ) else (
-	ctime.exe -end timings_debug.ctm %err%
+	ctime.exe -end timingsdll_debug.ctm %err%
 )
 
 if %err% == 0 (
-	 start w:\build\main.exe
+ echo ....... 
+ echo SUCCESS
+ echo .......
 )
 popd 

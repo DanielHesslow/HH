@@ -42,7 +42,6 @@ LayoutLocator locateLayout(Layout *root, int target_index);
 Layout *layoutFromLocator(LayoutLocator locator);
 int number_of_leafs(Layout *layout);
 int total_number_of_children(Layout *layout);
-void renderWithLayout(Bitmap bitmap, Layout *layout, char **items_ptr, char *items_end, void(*render_and_advance)(Bitmap bitmap, char **ptr));
 int favourite_descendant(Layout *layout);
 Layout *createLayout(LayoutType type, int width, int number_of_args, ...);
 #endif

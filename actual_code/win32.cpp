@@ -518,7 +518,10 @@ WinMain(HINSTANCE instance,
 	*buffer = openCommanLine();
 	data.commandLine = buffer;
 	data.activeTextBufferIndex = 0;
-	data.menu = DHDS_constructDA(MenuItem, 50,default_allocator);
+	data.menu = {};
+	data.menu.allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "menu user arena"));
+	data.menu.items = DHDS_constructDA(MenuItem, 50, default_allocator);
+	
 	//Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
 	//Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
 

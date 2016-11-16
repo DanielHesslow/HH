@@ -42,6 +42,12 @@ struct TextIterator
 	BufferHandle buffer_handle;
 };
 
+struct API_MenuItem
+{
+	char *name;
+	int name_length;
+	void *data;
+};
 
 struct ViewIterator
 {
@@ -53,6 +59,8 @@ struct ViewIterator
 typedef void(*StringFunction)(char *string_remaining, int string_length, void **user_data);
 	
 #define ALL_CURSORS -1
+
+#define FOR_CURSORS(iterator,api,view_handle) for(int iterator = 0;iterator<api.cursor.number_of_cursors(view_handle);iterator++)
 
 enum API_MoveMode
 {
@@ -145,6 +153,8 @@ struct API
 	struct
 	{
 		ViewHandle(*createFromFile)(char *path, int path_length);
+		ViewHandle(*createFromBufferHandle)(BufferHandle handle);
+		
 		void (*clone_view)(ViewHandle view_handle);
 		void  (*close)(ViewHandle view_handle);
 		void(*setActive)(ViewHandle view_handle);  //excluding commandline
@@ -152,6 +162,7 @@ struct API
 
 		void(*set_type)(ViewHandle view_handle, int type);
 		int(*get_type)(ViewHandle view_handle);
+
 
 	}view;
 	
@@ -204,12 +215,18 @@ struct API
 	{
 		int (*byteIndexFromLine)(BufferHandle buffer_handle, int line);
 		int (*lineFromByteIndex)(BufferHandle buffer_handle, int byte_index);
-		void (*openRedirectedCommandPrompt)(char *command, int command_length);
+		BufferHandle (*openRedirectedCommandPrompt)(char *command, int command_length);
+
+		void (*move_active_menu)(int dir);
+		void (*disable_active_menu)();
+		void (*addMenuItem)(API_MenuItem item);
+		void (*sortMenu)(int(*cmp)(API_MenuItem a, API_MenuItem b, void *user_data), void *user_data);
 	}misc;
 
 	struct
 	{
-		
+		void(*move)(int x_dir, int y_dir);
+		void(*setLayout)(Layout *layout);
 	}layout;
 
 	struct

@@ -14,6 +14,71 @@ struct CommandInfo
 	void(*charDown)(char *str, int strlen, void **user_data);
 };
 
+
+void *MenuAlloc(size_t bytes)
+{
+	return global_data->menu.allocator.alloc(bytes, "allocation", 0);
+}
+
+void MenuClear()
+{
+	arena_deallocate_all(global_data->menu.allocator);
+	global_data->menu.items.length = 0;
+}
+
+MenuItem MenuItemFromApiMenuItem(API_MenuItem item)
+{
+	MenuItem ret = {};
+	ret.data = item.data;
+	ret.name = {item.name,(size_t)item.name_length};
+	return ret;
+}
+
+API_MenuItem ApiMenuItemFromMenuItem(MenuItem item)
+{
+	API_MenuItem ret = {};
+	ret.data = item.data;
+	ret.name = item.name.start;
+	ret.name_length= item.name.length;
+	return ret;
+}
+
+void MenuAddItem(API_MenuItem item)
+{
+	char *str = (char *)MenuAlloc(item.name_length);
+	memcpy(str, item.name, item.name_length);
+	MenuItem item_ = {};
+	item_.data = item.data;
+	item_.name = { str,(size_t)item.name_length };
+	Add(&global_data->menu.items, item_);
+}
+
+static void *user_data_sort;
+int(*comparator_sort)(API_MenuItem a, API_MenuItem b, void *user_data);
+int comp(const void *a, const void *b)
+{
+	API_MenuItem a_ = ApiMenuItemFromMenuItem(*(MenuItem *)a);
+	API_MenuItem b_ = ApiMenuItemFromMenuItem(*(MenuItem *)b);
+	return comparator_sort(a_, b_, user_data_sort);
+}
+
+void MenuSort(int(*cmp)(API_MenuItem a, API_MenuItem b, void *user_data), void *user_data)
+{
+	comparator_sort = cmp;
+	user_data_sort = user_data;
+	qsort(&global_data->menu.items.start, global_data->menu.items.length, sizeof(MenuItem), comp);
+}
+
+void MenuMoveActiveItem(int dir)
+{
+	global_data->menu.active_item += dir;
+	clamp(global_data->menu.active_item, 0, global_data->menu.items.length);
+}
+void MenuDisableActiveItem()
+{
+	global_data->menu.active_item = 0;
+}
+
 //just a helper funtction to be able to iterate on all cursors. state is assumed to be initialized to 0
 inline bool next_cursor(TextBuffer *buffer, int cursor_index, int *out_cursor_index, int *state)
 {
@@ -69,25 +134,6 @@ internal void bindCommand(char *name, void(*func)(char *str, int str_len, void *
 }
 
 
-//OLD STUFF:
-
-internal void freeMenuItems(Data *data)
-{
-	for (int i = 0; i < data->menu.length; i++)
-	{
-		free_(data->menu.start[i].name.start);
-		free_(data->menu.start[i].data);
-	}
-	data->menu.length = 0;
-}
-
-
-
-struct MenuData
-{
-	bool isFile;
-};
-
 internal CommandInfo findMatchingCommand(MultiGapBuffer *buffer, DynamicArray_CommandInfo commands, bool *success)
 {
 	CommandInfo allocationInfo = {};
@@ -118,11 +164,7 @@ internal void keyDown_CommandLine(Data *data)
 
 	bool success;
 	CommandInfo command = findMatchingCommand(buffer, commands, &success);
-	if (!success)
-	{
-		freeMenuItems(data);
-		return;
-	}
+	if (!success) return;
 
 	MGB_Iterator rest = getIterator(buffer, DHSTR_strlen(command.name));
 
@@ -217,6 +259,11 @@ void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(Mods mods))
 	binding.funcType = Arg_Mods;
 	Add(bindings, binding);
 }
+
+
+
+
+
 
 
 internal void executeBindingFunction(KeyBinding binding, TextBuffer *buffer, Data *data, Mods currentMods)
@@ -363,11 +410,7 @@ void commandline_execute_command()
 
 	bool success;
 	CommandInfo command = findMatchingCommand(mgb, commands, &success);
-	if (!success)
-	{
-		freeMenuItems(global_data); //we totes need this to be fixed dude.
-		return;
-	}
+	if (!success) return;
 
 	MGB_Iterator rest = getIterator(mgb, DHSTR_strlen(command.name));
 
@@ -379,10 +422,8 @@ void commandline_execute_command()
 
 	free_(remainingString);
 	global_data->updateAllBuffers = true;
+	MenuClear();
 }
-
-
-
 
 MoveMode MoveMode_from_API_MoveMode(API_MoveMode mode)
 {
@@ -818,11 +859,15 @@ char get_byte(TextIterator it, int dir)
 		return *getCharacter(mgb,_it);
 	}
 }
+
+
+
 #include "intrin.h"
 #include "stdint.h"
 
 char32_t get_codepoint(TextIterator it, int dir)
 {
+	assert(dir == 1 || dir == -1);
 	//we better not be in the middle of a codepoint
 	MGB_Iterator _it = { it.current.block_index, it.current.sub_index };
 	MultiGapBuffer *mgb = ((BackingBuffer *)it.buffer_handle)->buffer;
@@ -835,9 +880,8 @@ char32_t get_codepoint(TextIterator it, int dir)
 		int num_bytes = __lzcnt16((uint16_t)~bytes[0])-8;
 		for (int i = 0; i < num_bytes-1; i++)
 		{
-			MoveIterator(mgb, &_it, 1);
+			if (!MoveIterator(mgb, &_it, 1))return 0;
 			bytes[len++] = *getCharacter(mgb, _it);
-		
 		}
 			 
 		start = bytes;
@@ -846,7 +890,7 @@ char32_t get_codepoint(TextIterator it, int dir)
 	{
 		for (int i = 0; i < 8; i++)
 		{
-			MoveIterator(mgb, &_it, -1);
+			if (!MoveIterator(mgb, &_it, -1))return 0;
 			++len;
 			bytes[sizeof(bytes) - len] = *getCharacter(mgb, _it);
 			int num_lo = __lzcnt16((uint16_t)~bytes[sizeof(bytes) - len]) - 8;
@@ -866,20 +910,33 @@ char32_t get_codepoint(TextIterator it, int dir)
 		{
 			if (len == 1)
 			{
-				result = bytes[0] & 0x7f;
+				result = start[0] & 0x7f;
 			}
 			else
 			{
-				result = (bytes[0] << (len + 1)) >> (len + 1);
+				result = (start[0] << (len + 1)) >> (len + 1);
 			}
 		}
 		else
 		{
-			result = (result << 6) | ((bytes[i] << 2) >> 2);
+			result = (result << 6) | ((start[i*dir] << 2) >> 2);
 		}
 	}
 	return result;
 }
+
+
+
+char cursor_get_byte(ViewHandle view_handle, int cursor, int dir)
+{
+	return get_byte(make_from_cursor(view_handle, cursor), dir);
+}
+
+char32_t cursor_get_codepoint(ViewHandle view_handle, int cursor, int dir)
+{
+	return get_codepoint(make_from_cursor(view_handle, cursor), dir);
+}
+
 
 int move(TextIterator *it, int direction, API_MoveMode mode, bool wrap)
 {
@@ -989,6 +1046,16 @@ void *createFromFile(char *path, int path_length)
 	return 0;
 }
 
+ViewHandle createFromBufferHandle(BufferHandle buffer_handle)
+{
+	BackingBuffer *backingBuffer = (BackingBuffer*)buffer_handle;
+	TextBuffer buffer = createTextBufferFromBackingBuffer(backingBuffer, DHSTR_MAKE_STRING("hello"));
+	Add(&global_data->textBuffers, buffer);
+	return &global_data->textBuffers.start[global_data->textBuffers.length - 1];
+}
+
+
+
 void clone_view(ViewHandle view_handle)
 {
 	assert(false && "na man, no time to implement atm");
@@ -997,7 +1064,6 @@ void clone_view(ViewHandle view_handle)
 void close(ViewHandle view_handle)
 {
 	TextBuffer *tb = ((TextBuffer*)view_handle);
-	closeTextBuffer(global_data); //closes current...
 	int index = tb - global_data->textBuffers.start;
 	freeTextBuffer(*tb);
 	Remove(&global_data->textBuffers, index);
@@ -1031,6 +1097,11 @@ int get_type(ViewHandle view_handle)
 	return (int)tb->bufferType;
 }
 
+void *openRedirectedCommandPrompt (char *command, int command_length)
+{
+	return platform_execute_command(command,command_length);
+}
+
 API getAPI()
 {
 	API api = {};
@@ -1062,6 +1133,10 @@ API getAPI()
 	api.cursor.number_of_cursors = cursor_number_of_cursors;
 	api.cursor.remove_codepoint  = cursor_remove_codepoint;
 	api.cursor.selection_length  = cursor_selection_length;
+	api.cursor.get_byte = cursor_get_byte;
+	api.cursor.get_codepoint = cursor_get_codepoint;
+
+
 
 	api.callbacks.bindCommand = callbacks_bind_command;
 	api.callbacks.bindKey = callbacks_bind_key;
@@ -1085,7 +1160,13 @@ API getAPI()
 
 	api.misc.byteIndexFromLine = byteIndexFromLine;
 	api.misc.lineFromByteIndex = lineFromByteIndex;
-	api.misc.openRedirectedCommandPrompt = 0; //@fixme
+	api.misc.openRedirectedCommandPrompt = openRedirectedCommandPrompt; //@fixme
+
+	api.misc.addMenuItem = MenuAddItem;
+	api.misc.sortMenu= MenuSort;
+	api.misc.move_active_menu = MenuMoveActiveItem;
+	api.misc.disable_active_menu= MenuDisableActiveItem;
+
 
 	api.text_iterator.make = make;
 	api.text_iterator.make_from_cursor = make_from_cursor;
@@ -1095,7 +1176,6 @@ API getAPI()
 	api.text_iterator.get_codepoint= get_codepoint;
 
 
-		
 	api.markup.background_color = background_color;
 	api.markup.font = font;
 	api.markup.get_initial_rendering_state = get_initial_rendering_state;
@@ -1110,8 +1190,8 @@ API getAPI()
 	api.view.createFromFile = createFromFile;
 	api.view.get_type= get_type;
 	api.view.set_type = set_type;
-	api.view.setActive= api.view.setActive;
-
+	api.view.setFocused = setFocused;
+	api.view.createFromBufferHandle= createFromBufferHandle;
 
 	return api;
 }

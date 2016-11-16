@@ -406,11 +406,17 @@ DEFINE_DynamicArray(TextBuffer);
 struct MenuItem
 {
 	DHSTR_String name;
-	int ordering; 
 	void *data;
 };
 
 DEFINE_DynamicArray(MenuItem);
+
+struct Menu
+{
+	DynamicArray_MenuItem items;
+	int active_item;
+	DH_Allocator allocator; //free on close
+};
 
 struct Data
 {
@@ -419,8 +425,7 @@ struct Data
 	int activeTextBufferIndex;
 	bool isCommandlineActive;
 	bool updateAllBuffers;
-	DynamicArray_MenuItem menu;
-	int activeMenuItem;
+	Menu menu;
 	bool eatNext;
 	Layout *layout;
 };

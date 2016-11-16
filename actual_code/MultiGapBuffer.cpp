@@ -217,12 +217,13 @@ bool codepoint_next(MultiGapBuffer *buffer, MGB_Iterator *it, char32_t *codepoin
 	return read;
 }
 
+char invalid = '0';
+
 char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)
 {
-	//ABC checks?
 	BufferBlock block = buffer->blocks.start[it.block_index];
+	if (!pushValid(buffer, &it)) return &invalid;
 	char *ret= &buffer->start[block.start+it.sub_index];
-	
 	return ret;
 }
 	
@@ -415,7 +416,7 @@ void appendCharacter(MultiGapBuffer *buffer, int caretId, char character)
 	// this right here below is the propper apps-hungarian.
 	// not the missunderstood one that microsoft is using today.
 	// It's not bad. It's just a simple way to keep track of what's what. 
-	// I'm guessing most people are using somehting similar. 
+	// I'm guessing most people are using something similar. 
 
 	int caretIndex = indexFromId(buffer,caretId);
 	BufferBlock *prev = &buffer->blocks.start[caretIndex];

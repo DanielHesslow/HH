@@ -1,5 +1,6 @@
 #ifndef MULTIGAPBUFFER_H
 #define MULTIGAPBUFFER_H
+#include "DH_DataStructures.h"
 
 struct MGB_Iterator
 {
