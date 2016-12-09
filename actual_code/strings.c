@@ -370,10 +370,10 @@ bool DHSTR_cmp(DHSTR_String a, DHSTR_String b, StringCmpMode mode)
 
 DHSTR_String DHSTR_subString(DHSTR_String a, int start, int end)
 {
-	assert(start <= end);
+	if (start >= end)return{};
+	end = min(end, a.length);
 	assert(start >= 0);
-	assert(end <= a.length);
-	
+
 	DHSTR_String ret;
 	ret.start = a.start + start;
 	ret.length = end - start;
@@ -503,6 +503,7 @@ DHSTR_String DHSTR_makeString_(wchar_t *string, void *buffer, int bufferlen)
 //null terminated utf16 string
 char16_t *DHSTR_utf16FromString(DHSTR_String string, void *buffer, int bufferlen)
 {
+	if (string.length == 0)return 0;
 	int32_t errors;
 	size_t new_len_in_bytes = utf8toutf16(string.start,string.length, (uint16_t *)buffer, bufferlen, &errors);
 	assert(errors == UTF8_ERR_NONE);
@@ -531,8 +532,6 @@ wchar_t *DHSTR_wchar_tFromString(DHSTR_String string, void *buffer, int bufferle
 	if (sizeof(wchar_t) == sizeof(char32_t))return (wchar_t *)DHSTR_utf32FromString(string, buffer, bufferlen);
 	assert(false && "wchar_t has a fucked up size");
 }
-
-
 
 #define DHSTR_UTF8_FROM_STRING(string,alloc)(DHSTR_utf8FromString(string,alloc(string.length+sizeof(char)),string.length+sizeof(char)))
 //null terminated utf8 string

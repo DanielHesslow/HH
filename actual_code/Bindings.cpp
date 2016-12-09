@@ -1,68 +1,58 @@
-#include "api.h"
-//#include <string>
+#include "api_2.h"
+#include "ctype.h"
+#include <set>
+#include "windows.h"
 
+internal void addDirFilesToMenu(std::string path);
 
-//#include "DH_MacroAbuse.h"
-//#include "windows.h"
-//#define alloc_(a,x)malloc(a)
-//#define free_(a)free(a)
-//#include "strings.c"
-
-//internal void addDirFilesToMenu(Data *data, DHSTR_String string, DHSTR_String  *name); //more platform, must be refactored to win32 
-API api;
 #define USE_API
 internal void showCommandLine()
 {
-	api.commandLine.open();
+	commandline_open();
 }
 
 internal void hideCommandLine()
 {
-	api.commandLine.close();
+	commandline_close();
 }
 
 internal void preFeedCommandLine(char *string, int length)
 {
-	api.commandLine.open();
-	api.commandLine.clear();
-	api.commandLine.feed(string, length);
+	commandline_open();
+	commandline_clear();
+	commandline_feed(string, length);
 }
-
-// ---- BACKEND API 
-
-void memory_for_last_event() {}
 
 internal void preFeedOpenFile()
 {
 	char buffer[] = u8"openFile ";
 	preFeedCommandLine(buffer, (sizeof(buffer) / sizeof(buffer[0]) - 1));
 }
-#include "ctype.h"
 
-
+#define FOR_CURSORS(cursor,handle) for(int cursor=0; cursor<num_cursors(handle);cursor++)
 void _delete(Mods mods, int direction)
 {
-	void *handle = api.handles.getFocusedViewHandle();
+	void *handle = view_handle_focused();
 	bool deleted = false;
 	if (mods & mod_control)
 	{
-		FOR_CURSORS(cursor, api, handle)
+		for (int cursor = 0; cursor<num_cursors(handle); cursor++)
 		{
-			if (api.cursor.selection_length(handle, cursor))
+			if (selection_length(handle, cursor))
 			{
-				api.cursor.delete_selection(handle, cursor);
+				delete_selection(handle, cursor);
 			}
 			else
 			{
 				char byte;
-				while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && isspace(byte) && byte != '\n')
+				while ((byte = cursor_get_codepoint(handle, cursor, direction)) && isspace(byte) && byte != '\n')
 				{
-					api.cursor.remove_codepoint(handle, cursor, direction);
+					cursor_remove_codepoint(handle, cursor, direction);
 					deleted = true;
 				}
-				while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && !isspace(byte))
+				while ((byte = cursor_get_codepoint(handle, cursor, direction)) && !isspace(byte))
 				{
-					api.cursor.remove_codepoint(handle, cursor, direction);
+					cursor_remove_codepoint(handle, cursor, direction);
 					deleted = true;
 				}
 			}
@@ -70,63 +60,62 @@ void _delete(Mods mods, int direction)
 	}
 	if (!deleted)
 	{
-		FOR_CURSORS(cursor, api, handle)
-			api.cursor.remove_codepoint(handle, cursor, direction);
+		for (int cursor = 0; cursor<num_cursors(handle); cursor++)
+			cursor_remove_codepoint(handle, cursor, direction);
 	}
 }
 
 void _move(Mods mods, int direction)
 {
-	void *handle = api.handles.getFocusedViewHandle();
+	void *handle = view_handle_focused();
 	bool moved = false;
 	if (mods & mod_control)
 	{
-		FOR_CURSORS(cursor, api, handle)
+		for (int cursor = 0; cursor<num_cursors(handle); cursor++)
 		{
 			char byte;
-			while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && isspace(byte) && byte != '\n')
+			while ((byte = cursor_get_codepoint(handle, cursor, direction)) && isspace(byte) && byte != '\n')
 			{
-				api.cursor.move(handle, direction, cursor, mods & mod_shift, move_mode_codepoint);
+				if (!byte)break;
+				cursor_move(handle, direction, cursor, mods & mod_shift, move_mode_codepoint);
 				moved = true;
 			}
-			while ((byte = api.cursor.get_codepoint(handle, cursor, direction)) && !isspace(byte))
+			while ((byte = cursor_get_codepoint(handle, cursor, direction)) && !isspace(byte))
 			{
-				api.cursor.move(handle, direction, cursor, mods & mod_shift, move_mode_codepoint);
+				cursor_move(handle, direction, cursor, mods & mod_shift, move_mode_codepoint);
 				moved = true;
 			}
 		}
 	}
 	if (!moved)
 	{
-		FOR_CURSORS(cursor, api, handle)
-			api.cursor.move(handle, direction, cursor, mods & mod_shift, move_mode_grapheme_cluster);
+		for (int cursor = 0; cursor<num_cursors(handle); cursor++)
+			cursor_move(handle, direction, cursor, mods & mod_shift, move_mode_grapheme_cluster);
 	}
 }
-
-
 
 void _moveRight(Mods mods)
 {
 	_move(mods, 1);
 }
+
 void _moveLeft(Mods mods)
 {
 	_move(mods, -1);
 }
 
-
-
-
 void _moveUp(Mods mods)
 {
-	void *handle = api.handles.getFocusedViewHandle();
-	api.cursor.move(handle, -1, ALL_CURSORS, mods & mod_shift, move_mode_line);
+	void *handle = view_handle_focused();
+	for (int cursor = 0; cursor<num_cursors(handle); cursor++)
+		cursor_move(handle, -1, cursor, mods & mod_shift, move_mode_line);
 }
 
 void _moveDown(Mods mods)
 {
-	void *handle = api.handles.getFocusedViewHandle();
-	api.cursor.move(handle, 1, ALL_CURSORS, mods & mod_shift, move_mode_line);
+	void *handle =view_handle_focused();
+	for (int cursor = 0; cursor<num_cursors(handle); cursor++)
+		cursor_move(handle, 1, cursor, mods & mod_shift, move_mode_line);
 }
 
 void _backSpace(Mods mods)
@@ -140,124 +129,12 @@ void _delete(Mods mods)
 	_delete(mods, 1);
 }
 
-#if 0
-internal int levDist(DHSTR_String string, DHSTR_String alternative)
+void charDownFileCommand(char *s, int s_len, void **ud)
 {
-	//callibrate and handle offsets (ie.) abcd should closer to bcd than it is to ape
-	const int DIFF = 10;
-	const int LEN = 1;
-
-	int dist = 0;
-	for (int i = 0; i < min(string.length, alternative.length); i++)
-	{
-		if (string.start[i] != alternative.start[i])
-		{
-			dist += DIFF;
-		}
-	}
-	dist += max(string.length - alternative.length, 0)*LEN;
-	return dist;
+	menu_clear();
+	std::string string(s, s+s_len);
+	addDirFilesToMenu(s);
 }
-#endif
-
-//bellow folllows a quick and dirty way of sorting which involves setting up a global variable
-//its certainly not pretty but should work fine.
-//static char *stringToCompareAgainst = (char *)0;
-/*
-internal int cmp(const void *va, const void *vb)
-{
-	CommandInfo *a = (CommandInfo*)va;
-	CommandInfo *b = (CommandInfo*)vb;
-
-	return levDist(stringToCompareAgainst, a->name) - levDist(stringToCompareAgainst, b->name);
-}
-*/
-//---menus
-#if 0
-internal int cmpMenuItem(const void *a, const void *b)
-{
-	return ((MenuItem *)a)->ordering - ((MenuItem *)b)->ordering;
-}
-
-internal void sortMenu(Data *data)
-{
-	qsort(data->menu.start, data->menu.length, sizeof(MenuItem), cmpMenuItem);
-}
-
-internal void setOrderMenu(Data *data, DHSTR_String string)
-{
-	for (int i = 0; i < data->menu.length; i++)
-	{
-		data->menu.start[i].ordering = levDist(string, data->menu.start[i].name);
-	}
-}
-
-internal void maxOrderSortedMenu(Data *data, int max)
-{
-	int newLen = -1;
-	for (int i = 0; i<data->menu.length; i++)
-	{
-		if (newLen == -1)
-		{
-			if (data->menu.start[i].ordering>max)
-			{
-				newLen = i;
-				free_(data->menu.start[i].name.start);
-			}
-		}
-		else
-		{
-			free_(data->menu.start[i].name.start);
-		}
-	}
-	if (newLen != -1)
-	{
-		data->menu.length = newLen;
-	}
-}
-#endif
-#if 0
-//---string man
-internal bool hasOkExtension(DHSTR_String file_name)
-{
-	bool hasDot;
-	int index = DHSTR_index_of(file_name, '.', DHSTR_INDEX_OF_LAST, &hasDot);
-
-	if (!hasDot) return false;
-	DHSTR_String extension = DHSTR_subString(file_name, index, file_name.length);
-
-	DHSTR_String extensions[] =
-	{
-		DHSTR_MAKE_STRING(".h"),
-		DHSTR_MAKE_STRING(".c"),
-		DHSTR_MAKE_STRING(".cpp"),
-		DHSTR_MAKE_STRING(".hpp"),
-		DHSTR_MAKE_STRING(".txt"),
-		DHSTR_MAKE_STRING(".bat"),
-		DHSTR_MAKE_STRING(".md"),
-	};
-
-	for (int i = 0; i < ARRAY_LENGTH(extensions); i++)
-	{
-		if (DHSTR_eq(extensions[i], extension, string_eq_length_matter)) return true;
-	}
-	return false;
-}
-
-#endif
-#if 0
-internal void charDownFileCommand(Data *data, DHSTR_String restOfTheBuffer)
-{
-#if 0
-	freeMenuItems(data);
-	DHSTR_String file;
-	addDirFilesToMenu(data, restOfTheBuffer, &file);
-	setOrderMenu(data, file);
-	sortMenu(data);
-	maxOrderSortedMenu(data, 10); //calibrate this
-#endif
-}
-#endif
 
 #if 0
 int diffIndexMove(Layout *root, int active_index, int dir, LayoutType type)
@@ -343,28 +220,86 @@ internal void insertCaret(TextBuffer *buffer, Dir dir)
 	removeOwnedEmptyCarets(buffer);
 }
 #endif
-#if 0
-internal void insertCaretAbove(TextBuffer *buffer)
+
+
+
+void insertCaretAbove()
 {
-	insertCaret(buffer, above);
+	ViewHandle view_handle = view_handle_active();
+	int _num_cursors = num_cursors(view_handle);
+	for (int cursor = 0; cursor < _num_cursors; cursor++)
+	{
+		Location loc = location_from_cursor(view_handle, cursor);
+		loc.line = max(loc.line - 1, 0);
+		cursor_add(view_handle, loc);
+	}
 }
 
-internal void insertCaretBelow(TextBuffer *buffer)
+void insertCaretBelow()
 {
-	insertCaret(buffer, below);
+	ViewHandle view_handle = view_handle_active();
+	int _num_cursors = num_cursors(view_handle);
+	for (int cursor = 0; cursor < _num_cursors; cursor++)
+	{
+		BufferHandle buffer_handle = buffer_handle_active();
+		Location loc = location_from_cursor(view_handle, cursor);
+		loc.line = min(loc.line + 1, num_lines(buffer_handle));
+		cursor_add(view_handle, loc);
+	}
 }
-#endif
+
+void removeAllButOneCaret()
+{
+	ViewHandle view_handle = view_handle_active();
+	int _num_cursors = num_cursors(view_handle);
+	for (int cursor = 1; cursor < _num_cursors; cursor++)
+	{
+		cursor_remove(view_handle, 1);
+	}
+	delete_selection(view_handle, 0);
+}
+
+
+std::string directory(std::string path)
+{
+	int index_of_last_slash = path.rfind('/');
+	if (index_of_last_slash == -1)return "";
+	else return path.substr(0, index_of_last_slash);
+}
 
 internal void openFileCommand(char *start, int length, void **user_data)
 {
-	api.view.createFromFile(start, length);
-	api.commandLine.close();
+	API_MenuItem item;
+	bool has_active_menu = menu_get_active(&item);
+	if (has_active_menu)
+	{
+		if (open_view(item.name, item.name_length))
+		{
+			commandline_close();
+		}
+		else
+		{
+			commandline_clear();
+			commandline_feed("openFile ",strlen("openFile "));
+			std::string path(start, start + length);
+			std::string dir = directory(path);
+			std::string item(item.name, item.name_length);
+			std::string to_feed = dir + item + "/";
+			commandline_feed((char *)to_feed.c_str(), to_feed.length());
+			charDownFileCommand((char *)to_feed.c_str(),to_feed.length(),user_data);
+		}
+	}
+	else
+	{
+		open_view(start, length);
+		commandline_close();
+	}
 }
 
-
+#if 0
 void find_mark_down(char *text, int text_length)
 {
-	void *view_handle = api.handles.getActiveViewHandle();
+	void *view_handle = view_handle_active()
 
 	api.markup.remove(view_handle, &find_mark_down);
 	if (text_length == 0) return;
@@ -401,109 +336,54 @@ void find_mark_down(char *text, int text_length)
 
 void find(char *start, int length)
 {
-	api.markup.remove(api.handles.getActiveBufferHandle(), find_mark_down);
+	markup_remove(buffer_handle_active(), find_mark_down);
 }
+#endif 
 
-/*
-void func()
-{
-	BufferHandle handle = api.handles.getActiveBufferHandle();
-	//FORALLCURSORS(cursor_index)
-	{
-		TextIterator it = api.text_iterator.make_from_cursor(handle,cursor);
-		char *string=0;
-		bool last_was_letter=false;
-		while (api.text_iterator.nextCodepoint(it, &string, false))
-		{
-			if (last_was_letter && !is_letter(string)){break;}
-			string = (char *)0; //clear out the string
-		}
-	}
-}
-*/
-#if 0
 
-bool splitPath(DHSTR_String path, DHSTR_String *_out_directory, DHSTR_String *_out_file)
+internal void addDirFilesToMenu(std::string path) 
 {
-	bool hashSlash;
-	int index = DHSTR_index_of(path, '/', DHSTR_INDEX_OF_LAST, &hashSlash);
-	if (hashSlash)
-	{
-		if (_out_directory)*_out_directory = DHSTR_subString(path, 0, index);
-		if (_out_file)*_out_file = index >= path.length - 1 ? DHSTR_MAKE_STRING("") : DHSTR_subString(path, index + 1, path.length - 1);
-	}
-	else
-	{
-		if (_out_directory)*_out_directory = path;
-		if (_out_file)*_out_file = {};
-	}
-	return hashSlash;
-}
+	WIN32_FIND_DATA ffd;
+	std::string search_path;
+	size_t index_last_slash = path.rfind('\\');
+	search_path ="./" + path + "*";
 
-internal void addDirFilesToMenu(Data *data, DHSTR_String path, DHSTR_String *_out_file) //more platform, must be refactored to win32 
-{
-	WIN32_FIND_DATAW ffd;
-	DHSTR_String directory;
-	bool hasDirectory = splitPath(path, &directory, _out_file);
-	DHSTR_String searchPath;
-	if (hasDirectory)
-	{
-		searchPath = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING("./"), directory, DHSTR_MAKE_STRING("/*"));
-	}
-	else
-	{
-		*_out_file = path;
-		searchPath = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING("."), DHSTR_MAKE_STRING("/*"));
-	}
-	HANDLE handle = FindFirstFileW(DHSTR_WCHART_FROM_STRING(searchPath, alloca), &ffd);
+	HANDLE handle = FindFirstFileA(search_path.c_str(), &ffd);
 	if (handle != INVALID_HANDLE_VALUE)
 	{
 		do
 		{
-			DH_Allocator macro_used_allocator = default_allocator;
-			DHSTR_String p = DHSTR_STRING_FROM_WCHART(ALLOCATE, ffd.cFileName);
-			MenuItem newItem = {};
-			newItem.name = p;
-			if (hasOkExtension(p))
+			API_MenuItem newItem = {};
+			newItem.name = ffd.cFileName;
+			newItem.name_length = strlen(newItem.name);
+			std::string p = ffd.cFileName;
+			std::string extension = p.substr(p.rfind('.')+1,newItem.name_length);
+			bool okExtension = extension == "txt"||extension == "c"|| extension == "cpp"|| extension == "bat" || extension == "h";
+			
+			if (okExtension || ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 			{
-#if 0
-				MenuData *menuData = (MenuData *)alloc_(sizeof(menuData), "menu data");
-				menuData->isFile = true;
-				newItem.data = menuData;
-				Add(&data->menu, newItem);
-#endif
+				menu_add(newItem);
 			}
-			else if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-			{
-#if 0
-				MenuData *menuData = (MenuData *)alloc_(sizeof(menuData), "menu data");
-				menuData->isFile = false;
-				newItem.data = menuData;
-				Add(&data->menu, newItem);
-#endif
-			}
-			else {
-				free_(p.start);
-			}
-		} while (FindNextFileW(handle, &ffd) != 0);  //we trigger some breakpoint in here. what's the problem?
+		} while (FindNextFileA(handle, &ffd) != 0);  //we trigger some breakpoint in here. what's t he problem?
 		FindClose(handle);
 	}
 }
-#endif
+
 
 
 #if 0
 void _cloneBuffer(Data *data)
 {
-	api.view.clone_view(api.handles.getActiveViewHandle());
+	api.view.clone_view(view_handle_active());
 }
 #endif
 
-//#include "DH_DataStructures.h"
 
 internal void appendVerticalTab()
 {
-	api.cursor.append_codepoint(api.handles.getActiveViewHandle(), ALL_CURSORS, -1, '\v');
+	ViewHandle handle = view_handle_active();
+	for (int cursor = 0; cursor < num_cursors(handle); cursor++)
+		append_codepoint(handle, cursor, -1, '\v');
 }
 #if 0
 
@@ -521,29 +401,28 @@ bool bool_eq(bool a, bool b) { return a == b; }
 DEFINE_HashTable(int, bool, silly_hash, bool_eq);
 #endif
 
-#include <set>
 
 std::set<int> big_titles;
 
 internal bool is_big_title(void *buffer_handle, int line)
 {
 
-	TextIterator it = api.text_iterator.make_from_location(buffer_handle, { line,0 });
+	TextIterator it = text_iterator_from_location(buffer_handle, { line,0 });
 	int ack = 0;
 	do {
-		char b = api.text_iterator.get_byte(it,1);
+		char b = text_iterator_get_byte(it,1);
 
 		if (b == '\n') break;
 		else if (b == '-') { if (++ack >= 3) return true; }
 		else ack = 0;
-	} while (api.text_iterator.move(&it, 1, move_mode_byte, false));
+	} while (text_iterator_move(&it, 1, move_mode_byte, false));
 	return false;
 }
 
 internal void init_big_titles(void *buffer_handle, std::set<int> *big_titles)
 {
 	big_titles->clear();
-	for (int i = 0; i < api.buffer.numLines(buffer_handle); i++)
+	for (int i = 0; i < num_lines(buffer_handle); i++)
 	{
 		if (is_big_title(buffer_handle, i))
 		{
@@ -558,23 +437,23 @@ internal void mark_bigTitles(void *view_handle)
 {
 	bool changed = false;
 
-	void *buffer_handle = api.handles.getBufferHandleFromViewHandle(view_handle);
+	void *buffer_handle = buffer_handle_from_view_handle(view_handle);
 	std::set<int> *big_titles;
 
-	void **mem = api.memory.getFunctionInfo(buffer_handle, &mark_bigTitles);
+	void **mem = function_info_ptr(buffer_handle, &mark_bigTitles);
 	if (*mem)
 	{
 		big_titles = (std::set<int> *)*mem;
 	}
 	else
 	{
-		big_titles = (std::set<int> *)api.memory.allocateMemory(buffer_handle, sizeof(std::set<int>));
+		big_titles = (std::set<int> *)memory_alloc(buffer_handle, sizeof(std::set<int>));
 		new (big_titles)std::set<int>();
 		changed = true;
 		init_big_titles(buffer_handle, big_titles);
 		*mem = big_titles;
 	}
-
+#if 0
 	BufferChange event;
 	while (api.changes.next_change(buffer_handle, &mark_bigTitles, &event))
 	{
@@ -598,22 +477,22 @@ internal void mark_bigTitles(void *view_handle)
 		else
 			big_titles->erase(event.location.line + 1);
 	}
-
+#endif
 	if (changed)
 	{
 		void *view_handle;
-		ViewIterator vi = api.buffer.view_iterator(buffer_handle);
-		while (api.buffer.next(&vi, &view_handle))
+		ViewIterator vi = view_iterator_from_buffer_handle(buffer_handle);
+		while (view_iterator_next(&vi, &view_handle))
 		{
-			float title_size = api.markup.get_initial_rendering_state(view_handle).scale*1.5f;
-			api.markup.remove(view_handle, &mark_bigTitles);
+			float title_size = markup_get_initial_rendering_state(view_handle).scale*1.5f;
+			markup_remove(view_handle, &mark_bigTitles);
 
 			
 			for (auto it = big_titles->begin(); it != big_titles->end(); ++it)
 			{
 				int line = *it;
-				api.markup.scale(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, title_size);
-				api.markup.text_color(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, default_colorScheme.active_color);
+				markup_scale(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, title_size);
+				markup_text_color(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, default_colorScheme.active_color);
 			}
 		}
 	}
@@ -797,77 +676,67 @@ internal void setActive(Data *data, int index)
 void dir()
 {
 	char *cmd = "dir";
-	void *buffer_handle = api.misc.openRedirectedCommandPrompt(cmd,strlen(cmd));
-	api.view.createFromBufferHandle(buffer_handle);
+	void *buffer_handle = open_redirected_terminal(cmd,strlen(cmd));
+	view_from_buffer_handle(buffer_handle);
 }
 
+#define external extern "C" __declspec(dllexport)
 
-void moveDownMenu()
+external ColorScheme get_colorScheme()
 {
-	
+	default_colorScheme.active_color = hsl(0.7f,0.3f,0.3f);
+	return default_colorScheme;
 }
 
-
-//#include "windows.h"
-extern "C"
+external void setBindingsLocal(void *view_handle)
 {
-	__declspec(dllexport) ColorScheme get_colorScheme()
+	//api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_selection);
+	//api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_bigTitles);
+
+	bind_key_mods(view_handle, VK_LEFT, atMost, mod_control | mod_shift, _moveLeft);
+	bind_key_mods(view_handle, VK_RIGHT, atMost, mod_control | mod_shift, _moveRight);
+	bind_key_mods(view_handle, VK_BACK, atMost, mod_control, _backSpace);
+	bind_key_mods(view_handle, VK_DELETE, atMost, mod_control, _delete);
+
+	bind_key(view_handle, 'C', precisely, mod_control, []() {copy(view_handle_active()); });
+	bind_key(view_handle, 'X', precisely, mod_control, []() {cut(view_handle_active()); });
+	bind_key(view_handle, 'V', precisely, mod_control, []() {paste(view_handle_active()); });
+
+	if (view_get_type(view_handle) == (int)buffer_mode_defualt)
 	{
-		default_colorScheme.active_color = hsl(0.7f,0.3f,0.3f);
-		return default_colorScheme;
+		bind_key(view_handle, 'D', precisely, mod_control, []() {dir(); });
+		bind_key_mods(view_handle, VK_UP, atMost, mod_shift, _moveUp);
+		bind_key_mods(view_handle, VK_DOWN, atMost, mod_shift, _moveDown);
+		bind_key(view_handle, 'S', precisely, mod_control, []() {save(view_handle_active()); });
+		bind_key(view_handle, 'Z', precisely, mod_control, []() {undo(view_handle_active()); });
+		bind_key(view_handle, 'Z', precisely, mod_control | mod_shift, []() {redo(view_handle_active()); });
+		bind_key(view_handle, 'W', precisely, mod_control, []() {view_close(view_handle_active()); });
+		bind_key(view_handle, VK_UP, precisely, mod_control, insertCaretAbove);
+		bind_key(view_handle, VK_DOWN, precisely, mod_control, insertCaretBelow);
+		bind_key(view_handle, 'C', precisely, mod_alt, []() {view_clone(view_handle_active()); });
+		//bind_key(view_handle, VK_PRIOR, precisely, mod_none, _moveUpPage);
+		//bind_key(view_handle, VK_NEXT, precisely, mod_none, _moveDownPage);
+		bind_key(view_handle, VK_ESCAPE, precisely, mod_none, removeAllButOneCaret);
+		bind_key(view_handle, '\t', precisely, mod_control, appendVerticalTab);
 	}
 
-	__declspec(dllexport) void setBindingsLocal(API _api, void *view_handle)
+	else if (view_get_type(view_handle) == (int)buffer_mode_commandline)
 	{
-		api = _api;
-		//api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_selection);
-		api.callbacks.registerCallBack(callback_pre_render, view_handle, &mark_bigTitles);
+		bind_key(view_handle, VK_RETURN, atLeast, mod_none, commandline_execute_command);
+		bind_key(view_handle, VK_DOWN, precisely, mod_none, []() {menu_move_active(1); });
+		bind_key(view_handle, VK_UP, precisely, mod_none, []() {menu_move_active(-1); });
+		bind_key(view_handle, VK_ESCAPE, precisely, mod_none, hideCommandLine);
 
-		api.callbacks.bindKey_mods(view_handle, VK_LEFT, atMost, mod_control | mod_shift, _moveLeft);
-		api.callbacks.bindKey_mods(view_handle, VK_RIGHT, atMost, mod_control | mod_shift, _moveRight);
-		api.callbacks.bindKey_mods(view_handle, VK_BACK, atMost, mod_control, _backSpace);
-		api.callbacks.bindKey_mods(view_handle, VK_DELETE, atMost, mod_control, _delete);
-
-		api.callbacks.bindKey(view_handle, 'C', precisely, mod_control, []() {api.clipboard.copy(api.handles.getActiveViewHandle()); });
-		api.callbacks.bindKey(view_handle, 'X', precisely, mod_control, []() {api.clipboard.cut(api.handles.getActiveViewHandle()); });
-		api.callbacks.bindKey(view_handle, 'V', precisely, mod_control, []() {api.clipboard.paste(api.handles.getActiveViewHandle()); });
-
-		if (api.view.get_type(view_handle) == (int)buffer_mode_defualt)
-		{
-			api.callbacks.bindKey(view_handle, 'D', precisely, mod_control, []() {dir(); });
-			api.callbacks.bindKey_mods(view_handle, VK_UP, atMost, mod_shift, _moveUp);
-			api.callbacks.bindKey_mods(view_handle, VK_DOWN, atMost, mod_shift, _moveDown);
-			api.callbacks.bindKey(view_handle, 'S', precisely, mod_control, []() {api.buffer.save(api.handles.getActiveViewHandle()); });
-			//api.callbacks.bindKey(view_handle, 'Z', precisely, mod_control, undoMany);
-			//api.callbacks.bindKey(view_handle, 'Z', precisely, mod_control | mod_shift, redoMany);
-			api.callbacks.bindKey(view_handle, 'W', precisely, mod_control, []() {api.view.close(api.handles.getActiveViewHandle()); });
-			//api.callbacks.bindKey(view_handle, VK_UP, precisely, mod_control, insertCaretAbove);
-			//api.callbacks.bindKey(view_handle, VK_DOWN, precisely, mod_control, insertCaretBelow);
-			api.callbacks.bindKey(view_handle, 'C', precisely, mod_alt, []() {api.view.clone_view(api.handles.getActiveViewHandle()); });
-			//api.callbacks.bindKey(view_handle, VK_PRIOR, precisely, mod_none, _moveUpPage);
-			//api.callbacks.bindKey(view_handle, VK_NEXT, precisely, mod_none, _moveDownPage);
-			//api.callbacks.bindKey(view_handle, VK_ESCAPE, precisely, mod_none, removeAllButOneCaret);
-			api.callbacks.bindKey(view_handle, '\t', precisely, mod_control, appendVerticalTab);
-		}
-
-		else if (api.view.get_type(view_handle) == (int)buffer_mode_commandline)
-		{
-			api.callbacks.bindKey(view_handle, VK_RETURN, atLeast, mod_none, api.commandLine.executeCommand);
-			api.callbacks.bindKey(view_handle, VK_DOWN, precisely, mod_none, []() {api.misc.move_active_menu(1)});
-			api.callbacks.bindKey(view_handle, VK_UP, precisely, mod_none, []() {api.misc.move_active_menu(-1)});
-			api.callbacks.bindKey(view_handle, VK_ESCAPE, precisely, mod_none, hideCommandLine);
-
-			api.callbacks.bindCommand("openFile", openFileCommand, 0, 0);
-			api.callbacks.bindCommand("o", openFileCommand, 0, 0);
-			api.callbacks.bindCommand("createFile", [](char *start, int length, void **userdata) {api.view.createFromFile(start, length); }, 0, 0);
-			api.callbacks.bindCommand("closeBuffer", [](char *start, int length, void **ud) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
-			api.callbacks.bindCommand("c", [](char *start, int length, void **ud) {api.view.close(api.handles.getActiveViewHandle()); }, 0, 0);
-			//api.callbacks.bindCommand("find", find, find_mark_down,0);
-		}
-
-		api.callbacks.bindKey(view_handle, 'O', precisely, mod_control, preFeedOpenFile);
-		//api.callbacks.bindKey(view_handle, 'B', precisely, mod_control, win32_runBuild);
-		//api.callbacks.bindKey(view_handle, 'N', precisely, mod_control, preFeedCreateFile);
+		bind_command("openFile", openFileCommand, charDownFileCommand, 0);
+		bind_command("o", openFileCommand, 0, 0);
+		bind_command("createFile", [](char *start, int length, void **userdata) {open_view(start, length); }, 0, 0);
+		bind_command("closeBuffer", [](char *start, int length, void **ud) {view_close(view_handle_active()); }, 0, 0);
+		bind_command("c", [](char *start, int length, void **ud) {view_close(view_handle_active()); }, 0, 0);
+		//api.callbacks.bindCommand("find", find, find_mark_down,0);
 	}
+
+	bind_key(view_handle, 'O', precisely, mod_control, preFeedOpenFile);
+	//bind_key(view_handle, 'B', precisely, mod_control, win32_runBuild);
+	//bind_key(view_handle, 'N', precisely, mod_control, preFeedCreateFile);
 }
 

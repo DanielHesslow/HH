@@ -38,8 +38,14 @@ struct Rect
 	int width;
 	int height;
 };
+enum Direction
+{
+	dir_right,
+	dir_left,
+};
 
-#include "History.h"
+//#include "History.h"
+#include "History_2.h"
 #include "MultiGapBuffer.h"
 
 struct ColorChange
@@ -56,6 +62,8 @@ struct Bitmap
 	int stride;
 	int bytesPerPixel;
 };
+
+
 #include "Layout.h"
 
 
@@ -121,12 +129,14 @@ struct CharBitmap
 
 
 typedef char16_t *PCHAR16;
+typedef TextBuffer *PTextBuffer;
 
 DEFINE_DynamicArray(identifier)
 
 DEFINE_DynamicArray(ColorChange)
 DEFINE_DynamicArray(CharBitmap)
 DEFINE_DynamicArray(PCHAR16)
+DEFINE_DynamicArray(PTextBuffer)
 
 
 
@@ -216,11 +226,11 @@ struct BackingBuffer
 	CommonBuffer commonBuffer;
 	DH_Allocator allocator;
 	MultiGapBuffer *buffer;
-	History history;
+	History_2 history_2;
 	DynamicArray_int lineSumTree;
 	int lines;
 	HashTable_PVOID_HistoryChangeTracker binding_next_change;
-	uint64_t ref_count;
+	DynamicArray_PTextBuffer textBuffers;
 	DHSTR_String path; 
 };
 
@@ -421,7 +431,7 @@ struct Menu
 struct Data
 {
 	TextBuffer *commandLine;
-	DynamicArray_TextBuffer textBuffers;
+	DynamicArray_PTextBuffer textBuffers;
 	int activeTextBufferIndex;
 	bool isCommandlineActive;
 	bool updateAllBuffers;
@@ -456,7 +466,8 @@ internal bool 		isLineBreak(char32_t codepoint);
 internal void       appendCharacter(TextBuffer *textBuffer, char character, int caretIdIndex, bool log = true);
 internal void		removeCharacter(TextBuffer *textBuffer, bool log = true);
 internal bool       removeCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log = true);
-internal void unDeleteCharacter(TextBuffer *textBuffer, char character, int caretIdIndex);
+internal void		unDeleteCharacter(TextBuffer *textBuffer, char character, int caretIdIndex, bool log=true);
+internal void markPreferedCaretXDirty(TextBuffer *textBuffer, int caretIdIndex);
 
 
 internal bool 		deleteCharacter(TextBuffer *textBuffer, int caretId,bool log = true);
@@ -499,6 +510,7 @@ enum MoveMode
 
 internal bool move_nc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection, MoveMode mode);
 internal bool move_llnc(TextBuffer *textBuffer, Direction dir, int caretIdIndex, bool log, MoveType type, MoveMode mode);
+internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, bool log, MoveMode mode);
 
 
 // should be in the win32 header.
@@ -509,8 +521,8 @@ internal void paste(TextBuffer *buffer);
 
 struct AvailableFont
 {
-	DHSTR_String path;
 	DHSTR_String name;
+	DHSTR_String path;
 };
 int cmp_font(void *va, void *vb)
 {

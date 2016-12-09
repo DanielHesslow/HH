@@ -1,9 +1,12 @@
 // BACKEND API LAYER
 
+#define API extern "C" __declspec(dllexport)
+#define external extern "C" __declspec(dllexport)
 
-#include "api.h"
+#define HEADER_ONLY
+//#include "api.h"
+#include "api_2.h"
 #include "header.h"
-Data *global_data;
 
 struct CommandInfo
 {
@@ -17,12 +20,12 @@ struct CommandInfo
 
 void *MenuAlloc(size_t bytes)
 {
-	return global_data->menu.allocator.alloc(bytes, "allocation", 0);
+	return global_data->menu.allocator.alloc(bytes, "allocation", global_data->menu.allocator.data);
 }
 
-void MenuClear()
+external void menu_clear()
 {
-	arena_deallocate_all(global_data->menu.allocator);
+	arena_clear(global_data->menu.allocator);
 	global_data->menu.items.length = 0;
 }
 
@@ -43,7 +46,7 @@ API_MenuItem ApiMenuItemFromMenuItem(MenuItem item)
 	return ret;
 }
 
-void MenuAddItem(API_MenuItem item)
+external void menu_add(API_MenuItem item)
 {
 	char *str = (char *)MenuAlloc(item.name_length);
 	memcpy(str, item.name, item.name_length);
@@ -62,59 +65,30 @@ int comp(const void *a, const void *b)
 	return comparator_sort(a_, b_, user_data_sort);
 }
 
-void MenuSort(int(*cmp)(API_MenuItem a, API_MenuItem b, void *user_data), void *user_data)
+void menu_sort(int(*cmp)(API_MenuItem a, API_MenuItem b, void *user_data), void *user_data)
 {
 	comparator_sort = cmp;
 	user_data_sort = user_data;
 	qsort(&global_data->menu.items.start, global_data->menu.items.length, sizeof(MenuItem), comp);
 }
 
-void MenuMoveActiveItem(int dir)
+external void menu_move_active(int dir)
 {
 	global_data->menu.active_item += dir;
-	clamp(global_data->menu.active_item, 0, global_data->menu.items.length);
-}
-void MenuDisableActiveItem()
-{
-	global_data->menu.active_item = 0;
+	global_data->menu.active_item  = clamp(global_data->menu.active_item, 0, global_data->menu.items.length);
 }
 
-//just a helper funtction to be able to iterate on all cursors. state is assumed to be initialized to 0
-inline bool next_cursor(TextBuffer *buffer, int cursor_index, int *out_cursor_index, int *state)
+void menu_disable_active()
 {
-	if (cursor_index == ALL_CURSORS)
-	{
-		if ((*state)++ < buffer->ownedCarets_id.length)
-		{
-			*out_cursor_index = *state-1;
-			return true;
-		}
-		else
-		{
-			*out_cursor_index = -1;
-			return false;
-		}
-	}
-	else
-	{
-		if (!((*state)++))
-		{
-			*out_cursor_index = cursor_index;
-			return true;
-		}
-		else
-		{
-			*out_cursor_index = -1;
-			return false;
-		}
-	}
+	global_data->menu.active_item = 0;
 }
 
 
 DEFINE_DynamicArray(CommandInfo)
 static DynamicArray_CommandInfo commands = constructDynamicArray_CommandInfo(100, "commandBindings");
 
-internal void bindCommand(char *name, void(*func)(char *str, int str_len, void **user_data))
+
+internal void bindCommand(char *name, StringFunction func)
 {
 	CommandInfo commandInfo = {};
 	commandInfo.name = name;
@@ -123,7 +97,7 @@ internal void bindCommand(char *name, void(*func)(char *str, int str_len, void *
 	Add(&commands, commandInfo);
 }
 
-internal void bindCommand(char *name, void(*func)(char *str, int str_len, void **user_data), void(*charDown)(char *str, int str_len, void **user_data))
+internal void bindCommand(char *name, StringFunction func, StringFunction charDown)
 {
 	CommandInfo commandInfo = {};
 	commandInfo.name = name;
@@ -195,7 +169,7 @@ bool matchMods(Mods mods, Mods filter, ModMode mode)
 }
 
 global_variable DynamicArray_KeyBinding *bindings = (DynamicArray_KeyBinding *)0;
-API getAPI();
+//external API getAPI();
 
 
 
@@ -208,7 +182,7 @@ void _setLocalBindings(TextBuffer *textBuffer)
 	if (!setBindingsLocal)return;
 	assert(bindings == 0); // this is fine till we're using mutple threads, assert to make sure!
 	bindings = &textBuffer->KeyBindings;
-	setBindingsLocal(getAPI(), textBuffer);
+	setBindingsLocal(textBuffer);
 	bindings = (DynamicArray_KeyBinding *)0;
 }
 
@@ -221,50 +195,6 @@ KeyBinding bindKeyBase(char VK_Code, ModMode modMode, Mods mods, void *func)
 	binding.modMode = modMode;
 	return binding;
 }
-
-
-#if 0
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(TextBuffer *buffer))
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_TextBuffer;
-	Add(bindings, binding);
-}
-
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(TextBuffer *buffer, Mods mods))
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_TextBuffer_Mods;
-	Add(bindings, binding);
-}
-
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(Data *data))
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_Data;
-	Add(bindings, binding);
-}
-#endif
-
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)())
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_Void;
-	Add(bindings, binding);
-}
-
-void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)(Mods mods))
-{
-	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
-	binding.funcType = Arg_Mods;
-	Add(bindings, binding);
-}
-
-
-
-
-
-
 
 internal void executeBindingFunction(KeyBinding binding, TextBuffer *buffer, Data *data, Mods currentMods)
 {
@@ -279,7 +209,20 @@ internal void executeBindingFunction(KeyBinding binding, TextBuffer *buffer, Dat
 	else assert(false);
 }
 
-// --- END BACKEND_API
+
+void bindKey(char VK_Code, ModMode modMode, Mods mods, void(*func)())
+{
+	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
+	binding.funcType = Arg_Void;
+	Add(bindings, binding);
+}
+
+void bindKeyMods(char VK_Code, ModMode modMode, Mods mods, void(*func)(Mods mods))
+{
+	KeyBinding binding = bindKeyBase(VK_Code, modMode, mods, (void *)func);
+	binding.funcType = Arg_Mods;
+	Add(bindings, binding);
+}
 
 
 
@@ -304,7 +247,8 @@ internal void executeBindingFunction(KeyBinding binding, TextBuffer *buffer, Dat
 
 
 
-ViewIterator view_iterator_from_buffer_handle(BufferHandle buffer_handle)
+
+external ViewIterator view_iterator_from_buffer_handle(BufferHandle buffer_handle)
 {
 	ViewIterator ret;
 	ret.buffer_handle = buffer_handle;
@@ -312,70 +256,66 @@ ViewIterator view_iterator_from_buffer_handle(BufferHandle buffer_handle)
 	return ret;
 }
 
-bool next_view(ViewIterator *iterator, ViewHandle *view_handle)
+external bool view_iterator_next(ViewIterator *iterator, ViewHandle *view_handle)
 {
-	// slow, what ever.
-	int ack = 0;
+	BackingBuffer *backingBuffer = (BackingBuffer *)iterator->buffer_handle;
+	if (iterator->next >= backingBuffer->textBuffers.length)
+	{
+		view_handle = 0;
+		return false;
+	}
+	*view_handle = backingBuffer->textBuffers.start[iterator->next++];
+	return true;
+}
+
+bool textBuffer_index(TextBuffer *textBuffer, int *_out_index)
+{
 	for (int i = 0; i < global_data->textBuffers.length; i++)
 	{
-		if (global_data->textBuffers.start[i].backingBuffer == iterator->buffer_handle)
+		if (global_data->textBuffers.start[i] == textBuffer)
 		{
-			if (ack++ == iterator->next)
-			{
-				++iterator->next;
-				*view_handle = &global_data->textBuffers.start[i];
-				return true;
-			}
+			*_out_index = i;
+			return true;
 		}
 	}
+	*_out_index = -1;
 	return false;
 }
 
-bool save_view(ViewHandle handle)
+external bool save(ViewHandle handle)
 {
 	saveFile((TextBuffer *)handle);
 	return true; // heh
 }
-int lines_from_buffer_handle(BufferHandle handle)
+external int num_lines(BufferHandle handle)
 {
 	return getLines((BackingBuffer *)handle);
 }
 
-bool next_change(BufferHandle buffer_handle, void *function, BufferChange *bufferChange)
-{
-	return next_history_change((BackingBuffer *)buffer_handle, function, bufferChange);
-}
 
-void mark_all_changes_read(BufferHandle buffer_handle, void *function)
-{
-	fast_forward_history_changes((BackingBuffer *)buffer_handle, function);
-}
 
-bool hash_moved_since_last(BufferHandle buffer_handle, void *function)
-{
-	return has_move_changed((BackingBuffer *)buffer_handle, function);
-}
-
-void clipboard_copy(ViewHandle view_handle)
+external void copy(ViewHandle view_handle)
 {
 	copy((TextBuffer *)view_handle);
 }
-void clipboard_paste(ViewHandle view_handle)
+
+external void paste(ViewHandle view_handle)
 {
 	paste((TextBuffer *)view_handle);
 }
-void clipboard_cut(ViewHandle view_handle)
+
+external void cut(ViewHandle view_handle)
 {
 	cut((TextBuffer *)view_handle);
 }
 
-ViewHandle commandline_open()
+external ViewHandle commandline_open()
 {
 	global_data->isCommandlineActive = true;
 	return global_data->commandLine;
 }
 
-void commandline_close()
+external void commandline_close()
 {
 	global_data->isCommandlineActive = false;
 }
@@ -389,20 +329,21 @@ void textBuffer_clear(TextBuffer *buffer)
 	}
 }
 
-void commandline_clear()
+external void commandline_clear()
 {
 	textBuffer_clear(global_data->commandLine);
 }
 
-void commandline_feed(char *string, int string_length)
+external void commandline_feed(char *string, int string_length)
 {
 	for (int i = 0; i < string_length; i++)
 	{
 		appendCharacter(global_data->commandLine, string[i], 0, true);
 	}
+	//keyDown_CommandLine(global_data);
 }
 
-void commandline_execute_command()
+external void commandline_execute_command()
 {
 	global_data->eatNext = true;
 
@@ -422,7 +363,6 @@ void commandline_execute_command()
 
 	free_(remainingString);
 	global_data->updateAllBuffers = true;
-	MenuClear();
 }
 
 MoveMode MoveMode_from_API_MoveMode(API_MoveMode mode)
@@ -437,34 +377,32 @@ MoveMode MoveMode_from_API_MoveMode(API_MoveMode mode)
 	}
 	return movemode_byte;
 }
-TextIterator make_from_cursor(ViewHandle view_handle, int cursor_index);
-int cursor_move(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode)
+external TextIterator text_iterator_from_cursor(ViewHandle view_handle, int cursor_index);
+external int cursor_move(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode)
 {
 	int ack = 0;
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	int state = 0;
-	int _cursor_index;
-	while (next_cursor(buffer,cursor_index, &_cursor_index, &state))
+
+	for (int i = 0; i < abs(direction); i++)
 	{
-		for (int i = 0; i < abs(direction); i++)
+		if (mode == move_mode_line)
 		{
-			if (mode == move_mode_line)
-			{
-				//TODO MAKE MOVE V RETURN SUCCESS
-				moveV_nc(buffer, select ? do_select : no_select, _cursor_index, direction < 0);
-			}
-			else
-			{
-				ack += move_llnc_(buffer, direction > 0 ? dir_right : dir_left, buffer->ownedCarets_id.start[_cursor_index], true, MoveMode_from_API_MoveMode(mode));
-			}
+			//TODO MAKE MOVE V RETURN SUCCESS
+			moveV_nc(buffer, select ? do_select : no_select, cursor_index, direction < 0);
 		}
-		if (!select)
+		else
 		{
-			setNoSelection(buffer, _cursor_index, do_log);
+			ack += move_llnc_(buffer, direction > 0 ? dir_right : dir_left, buffer->ownedCarets_id.start[cursor_index], true, MoveMode_from_API_MoveMode(mode));
 		}
-		if (mode != move_mode_line)
-			markPreferedCaretXDirty(buffer, _cursor_index);
 	}
+	if (!select)
+	{
+		setNoSelection(buffer, cursor_index, do_log);
+	}
+	if (mode != move_mode_line)
+		markPreferedCaretXDirty(buffer, cursor_index);
+	
 	return ack; //return number of places the cursors have moved together.
 }
 
@@ -523,63 +461,6 @@ struct StringAckumulator
 };
 
 
-
-//OPTIMAL MOVE:
-#if 0
-#define FOR_CARET(c) for(int c = 0; c < 100; c++)
-{
-	FOR_CARET(c)
-	{
-		c.move_codepoint(10);
-		c.move_grapheme_cluster(-10);
-		c.move_byte(5); // dangerous, might split codepoint
-
-		while (is_letter(get_codepoint(c,-1)))
-		{
-			int read = c.move_codepoint(-1);
-			if (!read) break;
-		}
-
-		TextIterator it = get_it(c);
-		while (!is_space(get_byte(it, -1)))
-		{
-			int read = move_byte(it, -1);
-			if (!read)break;
-		}
-	}
-}
-#endif
-
-
-#if 0
-bool caret_move_while (ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode,bool(*function)(char32_t character, void **user_data))
-{
-
-	assert(mode != move_mode_line && "move while does not support line moves atm (maybe)");
-	TextBuffer *buffer = (TextBuffer *)view_handle;
-	int state = 0;
-	int _cursor_index;
-	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
-	{
-		int caretId = textBuffer->ownedCarets_id.start[_cursor_index];
-		void *user_data= 0;
-		while (func(charAtDirOfCaret(textBuffer->backingBuffer->buffer, dir, caretId), &user_data))
-		{
-			if (!move(textBuffer, dir, i, log, selection))
-			{
-				break;
-			}
-
-		}
-		if (setPrefX)
-			markPreferedCaretXDirty(textBuffer, i);
-		else
-			setPreferedX(textBuffer, i);
-	}
-	removeOwnedEmptyCarets(textBuffer);
-}
-#endif
-
 internal void removeAllButOneCaret(TextBuffer *buffer)
 {
 	for (int i = 1; i < buffer->ownedCarets_id.length; )
@@ -588,14 +469,10 @@ internal void removeAllButOneCaret(TextBuffer *buffer)
 	}
 }
 
-bool cursor_move_to_location(ViewHandle view_handle, int cursor_index, bool select, int line, int column)
+external bool cursor_move_to_location(ViewHandle view_handle, int cursor_index, bool select, int line, int column)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
-	if (cursor_index == ALL_CURSORS)
-	{
-		removeAllButOneCaret(buffer);
-		cursor_index = 0;
-	}
+	
 
 	gotoStartOfLine(buffer, line, select ? do_select : no_select, cursor_index);
 	for (int i = 0; i < column; i++)
@@ -604,93 +481,70 @@ bool cursor_move_to_location(ViewHandle view_handle, int cursor_index, bool sele
 	return true; //TODO RETURN CORRECT
 }
 
-int cursor_add(ViewHandle view_handle, int line, int column)
+external int cursor_add(ViewHandle view_handle, Location loc)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
-	AddCaret(buffer, getLineStart(buffer->backingBuffer, line) + column);
+	AddCaret(buffer, getLineStart(buffer->backingBuffer, loc.line) + loc.column);
 	return buffer->ownedCarets_id.length - 1;
 }
 
-bool cursor_remove(ViewHandle view_handle, int cursor_index)
+external bool cursor_remove(ViewHandle view_handle, int cursor_index)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 
-	if (cursor_index == ALL_CURSORS) removeAllButOneCaret(buffer);
-	else removeCaret(buffer, cursor_index, do_log);
+	removeCaret(buffer, cursor_index, true);
 	return true; //TODO we can totes fail 
 }
 
-void cursor_append_codepoint(ViewHandle view_handle, int cursor_index, int direction, char32_t character)
+external void append_codepoint(ViewHandle view_handle, int cursor_index, int direction, char32_t character)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	int state = 0;
-	int _cursor_index;
 
-	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
-	{
-		for (int i = 0; i < direction; i++)
-			unDeleteCharacter(buffer, character, _cursor_index);
+	for (int i = 0; i < direction; i++)
+		unDeleteCharacter(buffer, character, cursor_index);
 
-		for (int i = 0; i < -direction; i++)
-			appendCharacter(buffer, character, _cursor_index);
-	}
+	for (int i = 0; i < -direction; i++)
+		appendCharacter(buffer, character, cursor_index);
 }
 
-void cursor_remove_codepoint(ViewHandle view_handle, int cursor_index, int direction)
+external void cursor_remove_codepoint(ViewHandle view_handle, int cursor_index, int direction)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	int state = 0;
-	int _cursor_index;
 
-	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
-	{
-		for (int i = 0; i < direction; i++)
-			deleteCharacter(buffer, _cursor_index);
+	for (int i = 0; i < direction; i++)
+		deleteCharacter(buffer, cursor_index);
 
-		for (int i = 0; i < -direction; i++)
-			removeCharacter(buffer, _cursor_index);
-	}
+	for (int i = 0; i < -direction; i++)
+		removeCharacter(buffer, cursor_index);
 }
 
-int cursor_selection_length(ViewHandle view_handle, int cursor_index)
+external int selection_length(ViewHandle view_handle, int cursor_index)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	MultiGapBuffer *mgb = buffer->backingBuffer->buffer;
 	int ack = 0;
 	
 	int state = 0;
-	int _cursor_index;
 
-	while (next_cursor(buffer, cursor_index, &_cursor_index, &state))
-	{
-		int selPos = getCaretPos(mgb, buffer->ownedSelection_id.start[_cursor_index]);
-		int carPos = getCaretPos(mgb, buffer->ownedCarets_id.start[_cursor_index]);
-		ack += abs(selPos - carPos);
-	}
+	int selPos = getCaretPos(mgb, buffer->ownedSelection_id.start[cursor_index]);
+	int carPos = getCaretPos(mgb, buffer->ownedCarets_id.start[cursor_index]);
+	ack += abs(selPos - carPos);
 	
 	return ack;
 }
 
-int cursor_delete_selection(ViewHandle view_handle, int cursor_index)
+external int delete_selection(ViewHandle view_handle, int cursor_index)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
-	if (cursor_index == ALL_CURSORS)
-	{
-		for (int i = 0; i < buffer->ownedCarets_id.length; i++)
-		{
-			removeSelection(buffer, i);
-		}
-		return 2; //TODO FIXME
-	}
-	else
-	{
-		removeSelection(buffer, cursor_index);
-		return 1; //TODO FIXME
-	}
-	
+	int selection_len = selection_length(view_handle, cursor_index);
+	removeSelection(buffer, cursor_index);
+	setNoSelection(buffer, do_log);
+	return selection_len; //TODO FIXME
 }
 
-int  cursor_number_of_cursors(ViewHandle view_handle)
+external int num_cursors(ViewHandle view_handle)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	return buffer->ownedCarets_id.length;
@@ -700,7 +554,7 @@ int  cursor_number_of_cursors(ViewHandle view_handle)
 
 
 	
-void callbacks_register_callback (CallBackTime time, ViewHandle view_handle, void (*function)(ViewHandle handle))
+external void register_callback (CallBackTime time, ViewHandle view_handle, void (*function)(ViewHandle handle))
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	switch(time)
@@ -713,65 +567,65 @@ void callbacks_register_callback (CallBackTime time, ViewHandle view_handle, voi
 	}
 }
 
-void callbacks_bind_key_mods(ViewHandle view_handle, char VK_Code, ModMode filter, Mods mods, void(*func)(Mods mods))
+external void bind_key_mods(ViewHandle view_handle, char VK_Code, ModMode filter, Mods mods, void(*func)(Mods mods))
+{
+	TextBuffer *buffer = (TextBuffer *)view_handle;
+	bindKeyMods(VK_Code, filter, mods, func);
+}
+
+external void bind_key (ViewHandle view_handle, char VK_Code, ModMode filter, Mods mods, void(*func)())
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	bindKey(VK_Code, filter, mods, func);
 }
 
-void callbacks_bind_key (ViewHandle view_handle, char VK_Code, ModMode filter, Mods mods, void(*func)())
-{
-	TextBuffer *buffer = (TextBuffer *)view_handle;
-	bindKey(VK_Code, filter, mods, func);
-}
-
-void callbacks_bind_command(char *name, StringFunction select, StringFunction charDown, void(*interupt)(void **user_data))
+external void bind_command(char *name, StringFunction select, StringFunction charDown, void(*interupt)(void **user_data))
 {
 	bindCommand(name, select, charDown);
 }
 
 
-ViewHandle getViewHandleFromIndex(int index)
+external ViewHandle view_handle_from_index(int index)
 {
 	if (index >= 0 && global_data->textBuffers.length > index)
-		return &global_data->textBuffers.start[index];
+		return global_data->textBuffers.start[index];
 	return 0;
 }
 
-ViewHandle getActiveViewHandle()	 // does not include the commandline, may return null if no buffer is open
+external ViewHandle view_handle_active()	 // does not include the commandline, may return null if no buffer is open
 {
-	return getViewHandleFromIndex(global_data->activeTextBufferIndex);
+	return view_handle_from_index(global_data->activeTextBufferIndex);
 }
 
-ViewHandle getCommandLineViewHandle()
+external ViewHandle view_handle_cmdline()
 {
 	return global_data->commandLine;
 }
 
-ViewHandle getFocusedViewHandle()    // includes the commandline
+external ViewHandle view_handle_focused()    // includes the commandline
 {
-	if (global_data->isCommandlineActive) return getCommandLineViewHandle();
-	else return getActiveViewHandle();
+	if (global_data->isCommandlineActive) return view_handle_cmdline();
+	else return view_handle_active();
 }
 
-BufferHandle getActiveBufferHandle()	 // does not include the commandline, may return null if no buffer is open
+external BufferHandle buffer_handle_active()	 // does not include the commandline, may return null if no buffer is open
 {
-	return((TextBuffer *)getActiveViewHandle())->backingBuffer;
+	return((TextBuffer *)view_handle_active())->backingBuffer;
 }
-BufferHandle getFocusedBufferHandle()    // includes the commandline
+external BufferHandle buffer_handle_focused()    // includes the commandline
 {
-	return((TextBuffer *)getFocusedViewHandle())->backingBuffer;
+	return((TextBuffer *)view_handle_focused())->backingBuffer;
 }
-BufferHandle getCommandLineBufferHandle()
+external BufferHandle buffer_handle_cmdline()
 {
-	return((TextBuffer *)getCommandLineViewHandle())->backingBuffer;
+	return((TextBuffer *)view_handle_cmdline())->backingBuffer;
 }
-BufferHandle getBufferHandleFromViewHandle(ViewHandle view_handle)
+external BufferHandle buffer_handle_from_view_handle(ViewHandle view_handle)
 {
 	return ((TextBuffer *)view_handle)->backingBuffer;
 }
 
-Location location_from_iterator(BufferHandle bufferHandle, TextIterator it)
+external Location location_from_iterator(BufferHandle bufferHandle, TextIterator it)
 {
 	BackingBuffer *bb = (BackingBuffer *)bufferHandle;
 	int pos = getIteratorPos(bb->buffer, { it.current.block_index,it.current.sub_index });
@@ -780,8 +634,14 @@ Location location_from_iterator(BufferHandle bufferHandle, TextIterator it)
 	return{ line, pos - line_start };
 }
 
+external Location location_from_cursor(ViewHandle viewHandle, int cursor_index)
+{
+	TextBuffer *tb = (TextBuffer *)viewHandle;
+	return getLocationFromCaret(tb, tb->ownedCarets_id.start[cursor_index]);
 
-void **getFunctionInfo(void *handle, void *function)
+}
+
+external void **function_info_ptr(void *handle, void *function)
 {
 	BindingIdentifier bi = { 1, function };
 	void **data=0;
@@ -791,23 +651,23 @@ void **getFunctionInfo(void *handle, void *function)
 		return insert(&((CommonBuffer *)handle)->bindingMemory, bi, data);
 }
 
-void *allocateMemory(void *handle, size_t size)
+external void *memory_alloc(void *handle, size_t size)
 {
 	CommonBuffer *cb = (CommonBuffer *)handle;
 	return cb->allocator.alloc(size, "user_space_allocation", cb->allocator.data);
 }
 
-void  deallocateMemory(void *handle, void *memory)
+external void memory_free(void *handle, void *memory)
 {
 	CommonBuffer *cb = (CommonBuffer *)handle;
 	cb->allocator.free(memory, cb->allocator.data);
 }
 
-int byteIndexFromLine(BufferHandle buffer_handle, int line)
+external int byte_index_from_line(BufferHandle buffer_handle, int line)
 {
 	return 0; //@fixme
 }
-int lineFromByteIndex(BufferHandle buffer_handle, int byte_index)
+external int line_from_byte_index(BufferHandle buffer_handle, int byte_index)
 {
 	return 0; //@fixme
 }
@@ -824,28 +684,26 @@ TextIterator _mk_it(MGB_Iterator mgbit, BufferHandle handle)
 	it.buffer_handle = handle;
 	return it;
 }
-TextIterator make(BufferHandle buffer_handle)
+
+external TextIterator text_iterator_start(BufferHandle buffer_handle)
 {
 	MultiGapBuffer *mgb = ((BackingBuffer *)buffer_handle)->buffer;
 	return _mk_it(getIterator(mgb),buffer_handle);
 }
 
-TextIterator make_from_location(BufferHandle buffer_handle, Location loc)
+external TextIterator text_iterator_from_location(BufferHandle buffer_handle, Location loc)
 {
 	BackingBuffer *backingBuffer = ((BackingBuffer *)buffer_handle);
 	return _mk_it(iteratorFromLocation(backingBuffer, loc),buffer_handle);
 }
 
-TextIterator make_from_cursor(ViewHandle view_handle, int cursor_index)
+external TextIterator text_iterator_from_cursor(ViewHandle view_handle, int cursor_index)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
-	assert(cursor_index != ALL_CURSORS && "must supply a specific cursor index to api__iterator.make_from_cursor");
-
-
 	return _mk_it(getIteratorFromCaret(tb->backingBuffer->buffer, tb->ownedCarets_id.start[cursor_index]),tb->backingBuffer);
 }
 
-char get_byte(TextIterator it, int dir)
+external char text_iterator_get_byte(TextIterator it, int dir)
 {
 	MGB_Iterator _it = { it.current.block_index, it.current.sub_index };
 	MultiGapBuffer *mgb = ((BackingBuffer *)it.buffer_handle)->buffer;
@@ -865,7 +723,7 @@ char get_byte(TextIterator it, int dir)
 #include "intrin.h"
 #include "stdint.h"
 
-char32_t get_codepoint(TextIterator it, int dir)
+external char32_t text_iterator_get_codepoint(TextIterator it, int dir)
 {
 	assert(dir == 1 || dir == -1);
 	//we better not be in the middle of a codepoint
@@ -894,7 +752,7 @@ char32_t get_codepoint(TextIterator it, int dir)
 			++len;
 			bytes[sizeof(bytes) - len] = *getCharacter(mgb, _it);
 			int num_lo = __lzcnt16((uint16_t)~bytes[sizeof(bytes) - len]) - 8;
-			if (num_lo == 0 || num_lo != 1) goto success;
+			if (num_lo != 1) goto success; //is this correct?
 		}
 		assert(false && "tried to read utf-8 larger than 8 bytes long ...");
 		success:
@@ -926,19 +784,18 @@ char32_t get_codepoint(TextIterator it, int dir)
 }
 
 
-
-char cursor_get_byte(ViewHandle view_handle, int cursor, int dir)
+external char cursor_get_byte(ViewHandle view_handle, int cursor, int dir)
 {
-	return get_byte(make_from_cursor(view_handle, cursor), dir);
+	return text_iterator_get_byte(text_iterator_from_cursor(view_handle, cursor), dir);
 }
 
-char32_t cursor_get_codepoint(ViewHandle view_handle, int cursor, int dir)
+external char32_t cursor_get_codepoint(ViewHandle view_handle, int cursor, int dir)
 {
-	return get_codepoint(make_from_cursor(view_handle, cursor), dir);
+	return text_iterator_get_codepoint(text_iterator_from_cursor(view_handle, cursor), dir);
 }
 
 
-int move(TextIterator *it, int direction, API_MoveMode mode, bool wrap)
+external int text_iterator_move(TextIterator *it, int direction, API_MoveMode mode, bool wrap)
 {
 	MultiGapBuffer *mgb = ((BackingBuffer *)it->buffer_handle)->buffer;
 	switch (mode)
@@ -953,37 +810,37 @@ int move(TextIterator *it, int direction, API_MoveMode mode, bool wrap)
 
 
 // --- Markup
-void remove (ViewHandle view_handle, void *function)
+external void markup_remove (ViewHandle view_handle, void *function)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	remove_rendering_changes(tb, function);
 }
 
-void highlight_color(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, Color color)
+external void markup_highlight_color(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, Color color)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	change_rendering_highlight_color(tb,start_inclusive,end_exclusive,color,function);
 }
 
-void background_color(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, Color color)
+external void markup_background_color(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, Color color)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	change_rendering_background_color(tb, start_inclusive, end_exclusive, color, function);
 }
 
-void text_color(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, Color color)
+external void markup_text_color(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, Color color)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	change_rendering_color(tb, start_inclusive, end_exclusive, color, function);
 }
 
-void scale(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, float scale)
+external void markup_scale(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, float scale)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	change_rendering_scale(tb, start_inclusive, end_exclusive, scale,function);
 }
 
-void font(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, char *font_name, int font_length)
+external void markup_font(ViewHandle view_handle, void *function, Location start_inclusive, Location end_exclusive, char *font_name, int font_length)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	DHSTR_String font_str= DHSTR_makeString_(font_name, font_length);
@@ -1013,30 +870,26 @@ CharRenderingInfo CharRenderingInfoFromRenderingState(RenderingState state)
 	return info;
 }
 
-RenderingState get_initial_rendering_state(void *view_handle)
+external RenderingState markup_get_initial_rendering_state(void *view_handle)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	RenderingState rs = {};
 	return RenderingStateFromCharRenderingInfo(tb->initial_rendering_state);
 }
-void set_initial_rendering_state(void *view_handle, RenderingState state) 
+
+external void markup_set_initial_rendering_state(void *view_handle, RenderingState state)
 {
 	TextBuffer *tb = (TextBuffer *)view_handle;
 	tb->initial_rendering_state = CharRenderingInfoFromRenderingState(state);
 }
 
 
-
-
 // --- view
-
-void *createFromFile(char *path, int path_length)
+external void *open_view(char *path, int path_length)
 {
-	DHSTR_String _tmp = DHSTR_makeString_(path, path_length);
-	DH_Allocator macro_used_allocator = default_allocator;
-	DHSTR_String path_str = DHSTR_CPY(_tmp, ALLOCATE);
+	DHSTR_String path_string = DHSTR_makeString_(path, path_length);
 	bool success;
-	TextBuffer buffer = openFileIntoNewBuffer(path_str, &success);
+	TextBuffer *buffer = openFileIntoNewBuffer(path_string, &success);
 	if (success)
 	{
 		Add(&global_data->textBuffers, buffer);
@@ -1046,32 +899,33 @@ void *createFromFile(char *path, int path_length)
 	return 0;
 }
 
-ViewHandle createFromBufferHandle(BufferHandle buffer_handle)
+external ViewHandle view_from_buffer_handle(BufferHandle buffer_handle)
 {
 	BackingBuffer *backingBuffer = (BackingBuffer*)buffer_handle;
-	TextBuffer buffer = createTextBufferFromBackingBuffer(backingBuffer, DHSTR_MAKE_STRING("hello"));
+	TextBuffer *buffer = createTextBufferFromBackingBuffer(backingBuffer, DHSTR_MAKE_STRING("hello"));
 	Add(&global_data->textBuffers, buffer);
 	return &global_data->textBuffers.start[global_data->textBuffers.length - 1];
 }
 
 
 
-void clone_view(ViewHandle view_handle)
+external void view_clone(ViewHandle view_handle)
 {
 	assert(false && "na man, no time to implement atm");
 }
 
-void close(ViewHandle view_handle)
+external void view_close(ViewHandle view_handle)
 {
 	TextBuffer *tb = ((TextBuffer*)view_handle);
-	int index = tb - global_data->textBuffers.start;
-	freeTextBuffer(*tb);
+	int index;
+	assert(textBuffer_index(tb, &index));
+	freeTextBuffer(tb);
 	Remove(&global_data->textBuffers, index);
 	global_data->activeTextBufferIndex = 0;
 	global_data->updateAllBuffers = true;
 }
 
-void setFocused(ViewHandle view_handle)
+external void view_set_focused(ViewHandle view_handle)
 {
 	TextBuffer *tb = ((TextBuffer*)view_handle);
 	if (tb == global_data->commandLine)
@@ -1080,43 +934,72 @@ void setFocused(ViewHandle view_handle)
 	}
 	else
 	{
-		int target_index = tb - global_data->textBuffers.start;
+		int target_index;
+		assert(textBuffer_index(tb, &target_index));
 		assert(target_index >= 0 && target_index < global_data->textBuffers.length);
 		global_data->activeTextBufferIndex = target_index;
 	}
 }
 
-void set_type(ViewHandle view_handle, int type)
+external void view_set_type(ViewHandle view_handle, int type)
 {
 	TextBuffer *tb = ((TextBuffer*)view_handle);
 	tb->bufferType = (BufferType)type;
 }
-int get_type(ViewHandle view_handle)
+
+external int view_get_type(ViewHandle view_handle)
 {
 	TextBuffer *tb = ((TextBuffer*)view_handle);
 	return (int)tb->bufferType;
 }
 
-void *openRedirectedCommandPrompt (char *command, int command_length)
+external void *open_redirected_terminal (char *command, int command_length)
 {
 	return platform_execute_command(command,command_length);
 }
 
-API getAPI()
+
+external bool menu_get_active(API_MenuItem *_out_MenuItem)
+{
+	Menu menu = global_data->menu;
+	if (!menu.active_item)return false;
+	else
+	{
+		if (_out_MenuItem) *_out_MenuItem = ApiMenuItemFromMenuItem(global_data->menu.items.start[global_data->menu.active_item - 1]);
+		return true;
+	}
+}
+#include "History_2.h"
+
+external void undo (ViewHandle handle)
+{
+	TextBuffer *tb = (TextBuffer *)handle;
+	undo(tb->backingBuffer);
+}
+
+
+external void redo(ViewHandle handle)
+{
+	TextBuffer *tb = (TextBuffer *)handle;
+	int branches = num_branches(&tb->backingBuffer->history_2, tb->backingBuffer->history_2.state.location);
+	redo(tb->backingBuffer,branches-1);
+}
+
+
+
+
+#if 0
+external API getAPI()
 {
 	API api = {};
 	api.buffer.view_iterator = view_iterator_from_buffer_handle;
-	api.buffer.next          = next_view;
-	api.buffer.save          = save_view;
-	api.buffer.numLines      = lines_from_buffer_handle;
+	api.buffer.next          = view_iterator_next;
+	api.buffer.save          = save;
+	api.buffer.numLines      = num_lines;
 
-	api.changes.has_moved     = hash_moved_since_last;
-	api.changes.mark_all_read = mark_all_changes_read;
-	api.changes.next_change   = next_change;
-	
-	api.clipboard.copy  = clipboard_copy;
-	api.clipboard.cut   = clipboard_cut;
-	api.clipboard.paste = clipboard_paste;
+	api.clipboard.copy  = copy;
+	api.clipboard.cut   = cut;
+	api.clipboard.paste = paste;
 
 	api.commandLine.clear          = commandline_clear;
 	api.commandLine.close          = commandline_close;
@@ -1124,79 +1007,81 @@ API getAPI()
 	api.commandLine.feed           = commandline_feed;
 	api.commandLine.open           = commandline_open;
 
-	api.cursor.append_codepoint  = cursor_append_codepoint;
-	api.cursor.delete_selection  = cursor_delete_selection;
+	api.cursor.append_codepoint  = append_codepoint;
+	api.cursor.delete_selection  = delete_selection;
 	api.cursor.add               = cursor_add;
 	api.cursor.remove            = cursor_remove;
 	api.cursor.move	             = cursor_move;
 	api.cursor.moveToLocation    = cursor_move_to_location;
-	api.cursor.number_of_cursors = cursor_number_of_cursors;
+	api.cursor.number_of_cursors = num_cursors;
 	api.cursor.remove_codepoint  = cursor_remove_codepoint;
-	api.cursor.selection_length  = cursor_selection_length;
+	api.cursor.selection_length  = selection_length;
 	api.cursor.get_byte = cursor_get_byte;
 	api.cursor.get_codepoint = cursor_get_codepoint;
 
+	api.callbacks.bindCommand = bind_command;
+	api.callbacks.bindKey = bind_key;
+	api.callbacks.bindKey_mods = bind_key_mods;
+	api.callbacks.registerCallBack = register_callback;
 
-
-	api.callbacks.bindCommand = callbacks_bind_command;
-	api.callbacks.bindKey = callbacks_bind_key;
-	api.callbacks.bindKey_mods = callbacks_bind_key_mods;
-	api.callbacks.registerCallBack = callbacks_register_callback;
-
-	api.handles.getActiveViewHandle = getActiveViewHandle;	 // does not include the commandline, may return null if no buffer is open
-	api.handles.getFocusedViewHandle = getFocusedViewHandle;    // includes the commandline
-	api.handles.getCommandLineViewHandle = getCommandLineViewHandle;
-	api.handles.getViewHandleFromIndex = getViewHandleFromIndex;
-	api.handles.getActiveBufferHandle = getActiveBufferHandle;	 // does not include the commandline, may return null if no buffer is open
-	api.handles.getFocusedBufferHandle = getFocusedBufferHandle;    // includes the commandline
-	api.handles.getCommandLineBufferHandle = getCommandLineBufferHandle;
-	api.handles.getBufferHandleFromViewHandle = getBufferHandleFromViewHandle;
+	api.handles.getActiveViewHandle = view_handle_active;	 // does not include the commandline, may return null if no buffer is open
+	api.handles.getFocusedViewHandle = view_handle_focused;    // includes the commandline
+	api.handles.getCommandLineViewHandle = view_handle_cmdline;
+	api.handles.getViewHandleFromIndex = view_handle_from_index;
+	api.handles.getActiveBufferHandle = buffer_handle_active;	 // does not include the commandline, may return null if no buffer is open
+	api.handles.getFocusedBufferHandle = buffer_handle_focused;    // includes the commandline
+	api.handles.getCommandLineBufferHandle = buffer_handle_cmdline;
+	api.handles.getBufferHandleFromViewHandle = buffer_handle_from_view_handle;
 
 	api.Location.from_iterator = location_from_iterator;
-
-	api.memory.allocateMemory = allocateMemory;
-	api.memory.deallocateMemory = deallocateMemory;
-	api.memory.getFunctionInfo = getFunctionInfo;
-
-	api.misc.byteIndexFromLine = byteIndexFromLine;
-	api.misc.lineFromByteIndex = lineFromByteIndex;
-	api.misc.openRedirectedCommandPrompt = openRedirectedCommandPrompt; //@fixme
-
-	api.misc.addMenuItem = MenuAddItem;
-	api.misc.sortMenu= MenuSort;
-	api.misc.move_active_menu = MenuMoveActiveItem;
-	api.misc.disable_active_menu= MenuDisableActiveItem;
+	api.Location.from_cursor = location_from_cursor;
 
 
-	api.text_iterator.make = make;
-	api.text_iterator.make_from_cursor = make_from_cursor;
-	api.text_iterator.make_from_location = make_from_location;
-	api.text_iterator.move = move;
-	api.text_iterator.get_byte= get_byte;
-	api.text_iterator.get_codepoint= get_codepoint;
+	api.memory.allocateMemory = memory_alloc;
+	api.memory.deallocateMemory = memory_free;
+	api.memory.getFunctionInfo = function_info_ptr;
 
+	api.misc.byteIndexFromLine = byte_index_from_line;
+	api.misc.lineFromByteIndex = line_from_byte_index;
+	api.misc.openRedirectedCommandPrompt = open_redirected_terminal; //@fixme
 
-	api.markup.background_color = background_color;
-	api.markup.font = font;
-	api.markup.get_initial_rendering_state = get_initial_rendering_state;
-	api.markup.set_initial_rendering_state = set_initial_rendering_state;
-	api.markup.highlight_color= highlight_color;
-	api.markup.remove= remove;
-	api.markup.scale= scale;
-	api.markup.text_color= text_color;
+	api.misc.addMenuItem = menu_add;
+	api.misc.sortMenu= menu_sort;
+	api.misc.move_active_menu = menu_move_active;
+	api.misc.disable_active_menu= menu_disable_active;
+	api.misc.clearMenu= menu_clear;
+	api.misc.get_active_menu_item = menu_get_active;
+	api.misc.undo = undo;
+	api.misc.redo = redo;
 
-	api.view.clone_view = clone_view;
-	api.view.close = close;
-	api.view.createFromFile = createFromFile;
-	api.view.get_type= get_type;
-	api.view.set_type = set_type;
-	api.view.setFocused = setFocused;
-	api.view.createFromBufferHandle= createFromBufferHandle;
+	api.text_iterator.make = text_iterator_start;
+	api.text_iterator.make_from_cursor = text_iterator_from_cursor;
+	api.text_iterator.make_from_location = text_iterator_from_location;
+	api.text_iterator.move = text_iterator_move;
+	api.text_iterator.get_byte= text_iterator_get_byte;
+	api.text_iterator.get_codepoint= text_iterator_get_codepoint;
+
+	api.markup.background_color = markup_background_color;
+	api.markup.font = markup_font;
+	api.markup.get_initial_rendering_state = markup_get_initial_rendering_state;
+	api.markup.set_initial_rendering_state = markup_set_initial_rendering_state;
+	api.markup.highlight_color= markup_highlight_color;
+	api.markup.remove= markup_remove;
+	api.markup.scale= markup_scale;
+	api.markup.text_color= markup_text_color;
+
+	api.view.clone_view = view_clone;
+	api.view.close = view_close;
+	api.view.createFromFile = open_view;
+	api.view.get_type= view_get_type;
+	api.view.set_type = view_set_type;
+	api.view.setFocused = view_set_focused;
+	api.view.createFromBufferHandle= view_from_buffer_handle;
 
 	return api;
 }
 
-
+#endif
 
 
 

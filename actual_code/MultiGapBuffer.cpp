@@ -1,5 +1,23 @@
 #include "MultiGapBuffer.h"
 
+
+struct Gap
+{
+	BufferBlock *prev;
+	BufferBlock *next;
+	int length; // is implicit but why not.
+};
+
+Gap getGap(MultiGapBuffer *buffer, int index)
+{
+	assert(index >= 0 && index < buffer->blocks.length - 1);
+	Gap gap = {};
+	gap.prev = &buffer->blocks.start[index];
+	gap.next = &buffer->blocks.start[index + 1];
+	gap.length = gap.next->start - (gap.prev->start + gap.prev->length);
+	return gap;
+}
+
 int indexFromId(MultiGapBuffer *buffer, int id)
 {
 	for (int i = 0; i < buffer->cursor_ids.length; i++)
@@ -25,8 +43,6 @@ MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id)
 
 void moveBlock(MultiGapBuffer *buffer, BufferBlock *block, int delta_pos)
 {
-	// this is not currently checking that the destination is free
-	// it should assert
 	memmove(&buffer->start[block->start+delta_pos], &buffer->start[block->start], block->length * sizeof(char));
 	block->start += delta_pos;
 }
@@ -144,6 +160,7 @@ char *start_of_block(MultiGapBuffer *buffer, int index)
 
 
 
+
 // push the iterator to the right into a valid position.
 // returns false if no valid position to the right exist.
 bool pushRight(MultiGapBuffer *buffer, MGB_Iterator *it)
@@ -198,7 +215,7 @@ bool MoveIterator(MultiGapBuffer *buffer, MGB_Iterator *it, int direction)
 	}
 	else
 	{
-		*it = before;
+		//*it = before;
 		return false;
 	}
 }
@@ -217,7 +234,7 @@ bool codepoint_next(MultiGapBuffer *buffer, MGB_Iterator *it, char32_t *codepoin
 	return read;
 }
 
-char invalid = '0';
+char invalid = 0;
 
 char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)
 {
@@ -244,28 +261,22 @@ char *get(MultiGapBuffer *buffer, int caretId, Direction dir)
 	}
 }
 
-MultiGapBuffer createMultiGapBuffer(int size)
+MultiGapBuffer createMultiGapBuffer(int size,DH_Allocator allocator)
 {
+	DH_Allocator macro_used_allocator = allocator;
 	MultiGapBuffer buffer = {};
-	buffer.blocks = constructDynamicArray_BufferBlock(5,"multiGapBuffer blocks");
-	buffer.start = (char *)alloc_(size*sizeof(char),"MultiGapBuffer");
-	buffer.length = size;
+	buffer.allocator = allocator;
+	buffer.blocks = constructDynamicArray_BufferBlock(5,"multiGapBuffer blocks",allocator);
+	buffer.start = (char *)ALLOC(allocator,size*sizeof(char));
+	buffer.capacity = size;
 	buffer.running_cursor_id = 994; // just some non-0 number to catch some bad bugs.
 	BufferBlock first = {0,0};
 	BufferBlock last = {size,0};
 	Add(&buffer.blocks,first);
 	Add(&buffer.blocks,last);
-	buffer.cursor_ids = constructDynamicArray_CursorIdentifier(20,"mutliGapBuffer cursors");
+	buffer.cursor_ids = constructDynamicArray_CursorIdentifier(20,"mutliGapBuffer cursors",allocator);
 	Add(&buffer.cursor_ids, { 0,buffer.running_cursor_id});
 	return buffer;
-}
-
-void freeMultiGapBuffer(MultiGapBuffer *buffer)
-{
-	free_(buffer->blocks.start);
-	free_(buffer->cursor_ids.start);
-
-	free_(buffer);
 }
 
 int length(MultiGapBuffer *buffer)
@@ -279,118 +290,95 @@ int length(MultiGapBuffer *buffer)
 	return ack;
 }
 
-void rebalance_RL(MultiGapBuffer *buffer)
+
+
+void rebalance(MultiGapBuffer *buffer, int index, int excess)
 {
-	//@bugs
-	float gap = (float)(buffer->length - length(buffer)) / (float)(buffer->blocks.length-1);
-	float ack = 0;
-	for (int i = buffer->blocks.length-1; i>=0; i--)
+	//pretty sure we've got issues.
+	//does this even work if the target isn't an integer?
+	if (index >= buffer->blocks.length - 1)
 	{
-		ack += buffer->blocks.start[i].length;
-		BufferBlock *block = &buffer->blocks.start[i];
-		int dx = (buffer->length-ack)- block->start;
-		assert(dx >= 0);
-		moveBlock(buffer, block, dx);
-		ack += gap;
+		assert(!excess);
+		return;
 	}
+
+	int target = (buffer->capacity - length(buffer))/(buffer->blocks.length-1);
+	int current = getGap(buffer, index).length;
+	
+	int delta = target - current + excess;
+	if (delta<0)
+	{
+		moveBlock(buffer, &buffer->blocks.start[index + 1], delta);
+		rebalance(buffer, index + 1, 0);
+	}
+	else
+	{
+		rebalance(buffer, index + 1, delta);
+		moveBlock(buffer, &buffer->blocks.start[index + 1], delta);
+	}
+}
+
+
+
+void growTo(MultiGapBuffer *buffer, uint64_t size)
+{
+	int multiple = 2;
+	while (buffer->capacity*multiple < size)multiple *= 2;
+	char *new_mem = (char *)ALLOC(buffer->allocator,buffer->capacity * multiple * sizeof(char));
+	buffer->capacity *= multiple;
+	float gap = (buffer->capacity - length(buffer)) / ((float)buffer->blocks.length - 1);
+	float ack = 0;
+
+	for (int i = 0; i < buffer->blocks.length; i++)
+	{
+		BufferBlock block = buffer->blocks.start[i];
+		memmove(&new_mem[(int)ack], &buffer->start[block.start], block.length*sizeof(char));
+		buffer->blocks.start[i].start = (int)ack;
+		ack += gap + buffer->blocks.start[i].length;
+	}
+	DeAllocate(buffer->allocator,buffer->start);
+	buffer->start = new_mem;
+}
+
+void grow(MultiGapBuffer *buffer)
+{
+	growTo(buffer, buffer->capacity * 2 * sizeof(char));
 }
 
 void maybeGrow(MultiGapBuffer *buffer)
 {//@not in action yet for obvious reasons.
-	float effectivity = ((float)length(buffer)/(float)buffer->length);
+	float effectivity = ((float)length(buffer) / (float)buffer->capacity);
 	if (effectivity > 0.5)
 	{
 		grow(buffer);
 	}
 	else
 	{
-		assert(false && "in place rebalance is not yet implemented");
-	}
-}
-
-void growTo(MultiGapBuffer *buffer, uint64_t size)
-{
-	int multiple = 2;
-	while (buffer->length*multiple < size)multiple *= 2;
-	//most this code is just for rebalancing the buffer.
-	//it's much easier when we doens't have to worry about overlapping blocks.
-	//so this is the optimal time to do it.
-	//although we should do it at other times as well.. 
-	char *new_mem = (char *)alloc_(buffer->length * multiple * sizeof(char), "grown multigapbuffer");
-	buffer->length *= multiple;
-	float gap = (buffer->length - length(buffer)) / ((float)buffer->blocks.length - 1);
-	float ack = 0;
-
-	for (int i = 0; i < buffer->blocks.length; i++)
-	{
-		BufferBlock block = buffer->blocks.start[i];
-		memcpy(&new_mem[(int)ack], &buffer->start[block.start], block.length*sizeof(char));
-		buffer->blocks.start[i].start = (int)ack;
-		ack += gap + buffer->blocks.start[i].length;
-	}
-	free_(buffer->start);
-	buffer->start = new_mem;
-}
-void grow(MultiGapBuffer *buffer)
-{
-	growTo(buffer, buffer->length * 2 * sizeof(char));
-}
-
-
-void getSurroundingGap(MultiGapBuffer *buffer, int caretIndex, int *prevGap, int *nextGap)
-{
-	BufferBlock current = buffer->blocks.start[caretIndex];
-	if (caretIndex > 0)
-	{
-		BufferBlock prev = buffer->blocks.start[caretIndex-1];
-		*prevGap = current.start - (prev.start + prev.length);
-	}
-	else
-	{
-		*prevGap = 0;
-	}
-	if (caretIndex < buffer->blocks.length-1)
-	{
-		BufferBlock next = buffer->blocks.start[caretIndex + 1];
-		*nextGap = next.start - (current.start + current.length);
-	}
-	else
-	{
-		*nextGap = 0;
+		rebalance(buffer, 0, 0);
 	}
 }
 
 int AddCaret_(MultiGapBuffer *buffer, int pos)
-{ //ie split block
-
-	MGB_Iterator it = getIterator(buffer,pos);
+{ 
+	// do no rebalancing, that's done on first insirt.
+	// this speeds things up if multiple cursors are added at once.
+	MGB_Iterator it = getIterator(buffer, pos);
 	BufferBlock *old_block = &buffer->blocks.start[it.block_index];
-
-	int prevGap, nextGap;
-	getSurroundingGap(buffer, it.block_index, &prevGap, &nextGap);
-	bool isLeftEdge = it.block_index == 0;
-	bool isRightEdge = it.block_index == buffer->blocks.length - 1;
-	int newGap = (prevGap + nextGap) / ((isLeftEdge||isRightEdge)?2:3);
-
-	BufferBlock new_block = {};
+	BufferBlock new_block;
 	new_block.start = old_block->start + it.sub_index;
-	//this is wrong. might cause negative length. No it fucking won't you stupid shit. 
-	new_block.length = old_block->length - it.sub_index; 
-	assert(new_block.length >= 0);
+	new_block.length = old_block->length - it.sub_index;
 	old_block->length = it.sub_index;
-
-#if 0 // this needs to be fixed. pronto but Idk It just won't work. am I beeing stupid here?
-	if (isLeftEdge)
-		moveBlock(buffer, old_block, -new_block.start+1);
-	else
-		//moveBlock(buffer, old_block, newGap - prevGap);
-	if(isRightEdge)
-		moveBlock(buffer, &new_block, (buffer->length-new_block.length) - new_block.start);
-	//else
-		//moveBlock(buffer, &new_block, nextGap - newGap);
-#endif 
-	Insert(&buffer->blocks, new_block, it.block_index+1);
+	Insert(&buffer->blocks, new_block, it.block_index + 1);
 	return it.block_index + 1;
+}
+
+void AddCaretWithId(MultiGapBuffer *buffer, int textBuffer_index, int pos, int Id)
+{
+	for (int i = 0; i < buffer->cursor_ids.length; i++)
+	{
+		assert(buffer->cursor_ids.start[i].id != Id);
+	}
+	Insert(&buffer->cursor_ids, { textBuffer_index, Id}, AddCaret_(buffer, pos) - 1);
 }
 
 int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
@@ -419,17 +407,15 @@ void appendCharacter(MultiGapBuffer *buffer, int caretId, char character)
 	// I'm guessing most people are using something similar. 
 
 	int caretIndex = indexFromId(buffer,caretId);
-	BufferBlock *prev = &buffer->blocks.start[caretIndex];
-	BufferBlock *next = &buffer->blocks.start[caretIndex + 1];
-
-	if ((next->start - (prev->start+prev->length)) != 0)
+	Gap gap= getGap(buffer,caretIndex);
+	if (gap.length)
 	{
-		prev->length++;
-		*end(buffer, *prev) = character;
+		gap.prev->length++;
+		*end(buffer, *gap.prev) = character;
 	}
 	else
 	{
-		grow(buffer);
+		maybeGrow(buffer);
 		appendCharacter(buffer, caretId, character);
 	}
 }
@@ -437,18 +423,16 @@ void appendCharacter(MultiGapBuffer *buffer, int caretId, char character)
 void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 {
 	int caretIndex = indexFromId(buffer, caretId);
-
-	BufferBlock *prev = &buffer->blocks.start[caretIndex];
-	BufferBlock *next = &buffer->blocks.start[caretIndex + 1];
-	if ((next->start - (prev->start + prev->length)) != 0)
+	Gap gap = getGap(buffer,caretIndex);
+	if (gap.length)
 	{
-		--next->start;
-		next->length++;
-		*start(buffer, *next )= character;
+		--gap.next->start;
+		gap.next->length++;
+		*start(buffer, *gap.next)= character;
 	}
 	else
 	{
-		grow(buffer);
+		maybeGrow(buffer);
 		invDelete(buffer, caretId, character);
 	}
 }
@@ -475,7 +459,7 @@ bool removeCharacter(MultiGapBuffer *buffer, int caretId)
 		}
 	}
 
-	assert("removeCharacter, 100 carets all in different buffers or bug, probably bug yoo");
+	assert("removeCharacter, 100 carets on top of each other or bug, probably bug yoo");
 	return false;
 }
 
@@ -511,13 +495,6 @@ int posFromId(MultiGapBuffer *buffer, int caretId)
 	return get(buffer, tmp);
 }
 
-void rebalanceBlock(MultiGapBuffer *buffer, int caretIndex)
-{
-	int prevGap, nextGap;
-	getSurroundingGap(buffer, caretIndex, &prevGap, &nextGap);
-	int delta = (nextGap - prevGap)/2;
-	moveBlock(buffer, &buffer->blocks.start[caretIndex], delta);
-}
 
 
 void removeCaret(MultiGapBuffer *buffer, int caretId)
@@ -583,37 +560,7 @@ bool HasCaretAtIterator(MultiGapBuffer*buffer, DynamicArray_int *ids, MGB_Iterat
 	}
 	return false;
 }
-/*
-bool HasCaretAtIterator(MultiGapBuffer*buffer, DynamicArray_int *ids, MGB_Iterator it)
-{
-if (buffer->blocks.start[caretIndex].length != 0) return false;
-if (ownsIndex(buffer, ids, caretIndex)) return true;
-for (int i = caretIndex+1; i < buffer->blocks.length-1; i++)
-{
-if (buffer->blocks.start[i].length == 0)
-{
-if (ownsIndex(buffer, ids, i)) return true;
-}
-else
-{
-break;
-}
-}
 
-for (int i = caretIndex - 1; i >= 0; i--)
-{
-if (buffer->blocks.start[i+1].length == 0)
-{
-if (ownsIndex(buffer, ids, i)) return true;
-}
-else
-{
-break;
-}
-}
-return false;
-}
-*/
 bool isEmptyCaret(MultiGapBuffer *buffer, DynamicArray_int *ids, int index)
 {//only forwards (just a helper for the function blow. should probably not be reused. needs testing.
 	for (int i = 1;;i++)
@@ -643,7 +590,6 @@ void removeEmpty(TextBuffer *textBuffer)
 		if (isEmptyCaret(buffer,&textBuffer->ownedCarets_id,index))
 		{
 			removeCaret(textBuffer, i,true);
-			rebalanceBlock(buffer, index);
 		}
 	}
 }
@@ -670,9 +616,7 @@ bool mgb_moveLeft(MultiGapBuffer *buffer, int caretId)
 	if ((caretIndex == 0 && p->length == 0))
 		return false;
 	
-	//assert(n->length >= 0);
-
-	if (p->length <= 0)
+	if (!p->length)
 	{
 		DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[caretIndex], buffer->cursor_ids.start[caretIndex - 1]);
 		CheckOverlapp(buffer);

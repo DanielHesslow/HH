@@ -17,31 +17,17 @@
 
 inline uint64_t ciel_to_multiple_of(uint64_t i, int mult);
 
-struct DH_Allocator
-{
-	void *(*alloc)(size_t bytes_to_alloc, void *allocation_info, void *data);
-	void(*free)(void *mem_to_free, void *data);
-	void *data;
-};
+
 
 #define ALLOC(allocator, bytes) Allocate(allocator,bytes,DHMA_LOCATION)
-void *Allocate(DH_Allocator allocator, size_t bytes_to_alloc, void *allocation_info)
-{
-	return allocator.alloc(bytes_to_alloc, allocation_info, allocator.data);
-}
 
-void DeAllocate(DH_Allocator allocator, void *mem)
-{
-	allocator.free(mem, allocator.data);
-}
 
 #include "malloc.h" //for alloca, lets remove to all this shit later on. I don't want it.
 /*
 void* __cdecl _alloca(_In_ size_t _Size);
 #define alloca _alloca
 */
-
-#include "arena_allocator.cpp"
+#include "..\\libs\\stb_truetype.h" 
 #include "Allocation.h"
 #include "DH_DataStructures.h"
 
@@ -52,13 +38,55 @@ void* __cdecl _alloca(_In_ size_t _Size);
 #include "MultiGapBuffer.cpp"
 #include "colorScheme.h"
 #include "ClipBoard.hpp"
-#include "History.cpp"
+//#include "History.cpp"
 #include "platform.h"
+#include "arena_allocator.cpp"
+#include "History_2.h"
+#include "History_2.cpp"
+
+
+
+#define NUM_PAGES 800
+#define MEMSTACK_IMPLEMENTATIOn
+#include "L:\MemStack.h"
+
+struct Stack
+{
+	char *start;
+	Stack()
+	{
+		start = MemStack_GetTop();
+	}
+	~Stack()
+	{
+		MemStack_SetTop(start);
+	}
+};
+
+
 
 void *platform_alloc_compat(size_t bytes_to_alloc, void *alloc_info, void *data) { return platform_alloc(bytes_to_alloc); }
 void platform_free_compat(void *mem, void *data) { platform_free(mem); }
 
 DH_Allocator platform_allocator = { platform_alloc_compat,platform_free_compat,0 };
+
+
+void *stack_alloc_compat(size_t bytes_to_alloc, void *alloc_info, void *data) { return MemStack_Push(bytes_to_alloc); }
+void stack_free_compat(void *mem, void *data) {}
+
+DH_Allocator stack_allocator = { stack_alloc_compat ,stack_free_compat,0 }; // used for permanent data. 
+
+static DH_Allocator font_allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "textBuffer arena"));
+
+#define STBTT_STATIC
+#define STB_TRUETYPE_IMPLEMENTATION 
+#define STBTT_malloc(x,u) alloc_(x,u)
+#define STBTT_free(x,u) free_(x)
+#define STBTT_strlen(x) strlen(x);
+
+#include "..\\libs\\stb_truetype.h" 
+
+
 
 
 ColorScheme active_colorScheme = default_colorScheme;
@@ -78,14 +106,16 @@ internal int calculateIteratorX(TextBuffer *textBuffer, MGB_Iterator it, CharRen
 	int line = getLineFromIterator(textBuffer, it);
 	CharRenderingInfo rendering = renderingStateFromLine(textBuffer, line);
 	int initial_byte_pos = 0;
-	if (!MoveIterator(mgb, &it, -1));
-	for (;;)
+	if (MoveIterator(mgb, &it, -1))
 	{
-		if (isLineBreak(*getCharacter(mgb, it))) break;
-		if (!MoveIterator(mgb, &it, -1))break;
-		++initial_byte_pos;
+		for (;;)
+		{
+			if (isLineBreak(*getCharacter(mgb, it))) break;
+			++initial_byte_pos;
+			if (!MoveIterator(mgb, &it, -1))break;
+		}
+		MoveIterator(mgb, &it, 1);
 	}
-	if (!MoveIterator(mgb, &it, 1));
 
 	Location loc = { line,0 };
 	char32_t codepoint_a, codepoint_b;
@@ -230,6 +260,8 @@ internal void removeSelection(TextBuffer *textBuffer, int caretIdIndex)
 
 	for (int i = 0; i < -length; i++)
 		deleteCharacter(textBuffer, caretIdIndex, true);
+
+	setNoSelection(textBuffer, caretIdIndex, do_log);
 }
 
 internal void removeSelection(TextBuffer *textBuffer)
@@ -554,6 +586,7 @@ CharRenderingInfo apply_rendering_change(CharRenderingInfo rendering, CharRender
 
 CharRenderingInfo apply_rendering_changes_at(TextBuffer *textBuffer, Location loc, CharRenderingInfo rendering)
 {
+	
 	if (textBuffer->rendering_change_is_dirty) apply_changes(textBuffer);
 	CharRenderingChange ch = {};
 	ch.location = loc;
@@ -655,7 +688,42 @@ internal void redoLineSumTree(BackingBuffer *backingBuffer)
 	} while (MoveIterator(backingBuffer->buffer,&it,read));
 	backingBuffer->lines = line+1;
 	binsumtree_set(sum_tree, line++, counter);
+	
 }
+
+internal void validate_sum_tree(BackingBuffer *backingBuffer)
+{
+	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
+	MGB_Iterator it = getIterator(backingBuffer->buffer);
+	int counter = 0;
+	int line = 0;
+	int read;
+	do {
+		char32_t codepoint;
+		read = getCodepoint(backingBuffer->buffer, it, &codepoint);
+		counter += read;
+		if (isLineBreak(codepoint))
+		{
+			assert(counter != 0);
+			int value;
+			{
+				binsumtree_leaf_value(sum_tree, line, &value);
+				assert(value == counter);
+			}
+			line++;
+			counter = 0;
+		}
+	} while (MoveIterator(backingBuffer->buffer, &it, read));
+	backingBuffer->lines = line + 1;
+
+	{
+		int value;
+		binsumtree_leaf_value(sum_tree, line, &value);
+		assert(value == counter);
+	}
+	line++;
+}
+
 
 internal void initLineSumTree(BackingBuffer *backingBuffer,DH_Allocator allocator)
 {
@@ -666,75 +734,15 @@ internal void initLineSumTree(BackingBuffer *backingBuffer,DH_Allocator allocato
 
 internal int getLines(BackingBuffer *buffer)
 {
-	BufferChange entry;
-	while (next_history_change(buffer, &getLines, &entry))
-	{
-		if (isLineBreak(entry.character))
-		{
-			switch (entry.action)
-			{
-			case action_undelete:
-			case action_add:
-				++buffer->lines;
-				break;
-			case action_delete:
-			case action_remove:
-				--buffer->lines;
-			}
-		}
-	}
 	return buffer->lines;
 }
 
-internal void updateLineData(BackingBuffer *backingBuffer)
-{
-	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
-	BufferChange entry;
-	while (next_history_change(backingBuffer, &updateLineData, &entry))
-	{
-		assert(entry.location.line >= 0);
-		switch (entry.action)
-		{
-		case buffer_change_add:
-		{
-			if (isLineBreak(entry.character))
-			{
-				int leaf_index;
-				if (!binsumtree_index_from_leaf_index(sum_tree, entry.location.line, &leaf_index))assert(false && "this shouldn't happen...");
-				int length_of_current_line = sum_tree->start[leaf_index];
-				int length_of_new_line = length_of_current_line - entry.location.column;
-				assert(length_of_new_line >= 0);
-				binsumtree_set(sum_tree, entry.location.line, entry.location.column + 1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?) dude fuck \r\n, we don't have it. (removed on open file, (maybe) added on write file)
-				binsumtree_insert(sum_tree, entry.location.line + 1, length_of_current_line - entry.location.column);
-			}
-			else
-			{
-				binsumtree_set_relative(sum_tree, entry.location.line, +1);
-			}
-		}break;
-		case buffer_change_remove:
-		{
-			if (isLineBreak(entry.character))
-			{
-				int leaf_index;
-				if (!binsumtree_index_from_leaf_index(sum_tree, entry.location.line, &leaf_index))assert(false && "this shouldn't happen...");
-				int len = sum_tree->start[leaf_index] - 1;
-				binsumtree_set_relative(sum_tree, entry.location.line - 1, len);
-				binsumtree_remove(sum_tree, entry.location.line);
-			}
-			else
-			{
-				binsumtree_set_relative(sum_tree, entry.location.line, -1);
-			}
-		}break;
-		}
-	}
-}
+
+
 
 internal int getLineLength(BackingBuffer *backingBuffer, int line)
 {
 	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
-	updateLineData(backingBuffer);
 	int value;
 	if (!binsumtree_leaf_value(sum_tree, line, &value))
 	{
@@ -746,7 +754,6 @@ internal int getLineLength(BackingBuffer *backingBuffer, int line)
 internal int getLine(BackingBuffer *backingBuffer, int pos)
 {
 	DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
-	updateLineData(backingBuffer);
 	int res_index = -1;
 	if (!binsumtree_search(sum_tree, pos, &res_index))
 	{
@@ -866,19 +873,72 @@ void removeOwnedEmptyCarets(TextBuffer *textBuffer)
 	checkIdsExist(textBuffer);
 }
 
-// ---MODIFY BUFFER---
-//global_variable int currentCaretIndex = 0;
-internal void appendCharacter(TextBuffer *textBuffer, char character, int caretIdIndex, bool log) //Bool log, who the fuck am I?
+
+void change_added(BackingBuffer *backingBuffer, Location loc, char byte)
 {
-	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
-	Location loc;
-	if (log) loc = getLocationFromCaret(textBuffer, caretId);
-	if (log) logAdded(textBuffer, character, caretIdIndex, loc);
-	
-	appendCharacter(textBuffer->backingBuffer->buffer, caretId, character);
-	markPreferedCaretXDirty(textBuffer, caretIdIndex);
+	{//line tracking
+		DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
+		if (byte == '\n')
+		{
+			int leaf_index;
+			if (!binsumtree_index_from_leaf_index(sum_tree, loc.line, &leaf_index))assert(false && "this shouldn't happen...");
+			int length_of_current_line = sum_tree->start[leaf_index];
+			int length_of_new_line = length_of_current_line - loc.column;
+			assert(length_of_new_line >= 0);
+			binsumtree_set(sum_tree, loc.line, loc.column + 1); // we count the linebreak on the current line aswell. (assuming the linebreak is one byte long dude what about /r/n?) dude fuck \r\n, we don't have it. (removed on open file, (maybe) added on write file)
+			binsumtree_insert(sum_tree, loc.line + 1, length_of_current_line - loc.column);
+			++backingBuffer->lines;
+		}
+		else
+		{
+			binsumtree_set_relative(sum_tree, loc.line, +1);
+		}
+		validate_sum_tree(backingBuffer);
+	}
+
+	for (int i = 0; i < backingBuffer->textBuffers.length; i++)
+	{
+		TextBuffer *textBuffer = backingBuffer->textBuffers.start[i];
+	}
 }
 
+void change_removed(BackingBuffer *backingBuffer, Location loc, char byte)
+{
+	{ //line tracking
+		DynamicArray_int *sum_tree = &backingBuffer->lineSumTree;
+		if (byte == '\n')
+		{
+			int leaf_index;
+			if (!binsumtree_index_from_leaf_index(sum_tree, loc.line, &leaf_index))assert(false && "this shouldn't happen...");
+			int len = sum_tree->start[leaf_index] - 1;
+			binsumtree_set_relative(sum_tree, loc.line - 1, len);
+			binsumtree_remove(sum_tree, loc.line);
+			--backingBuffer->lines;
+		}
+		else
+		{
+			binsumtree_set_relative(sum_tree, loc.line, -1);
+		}
+		validate_sum_tree(backingBuffer);
+	}
+}
+
+
+// ---MODIFY BUFFER---
+internal void appendCharacter(TextBuffer *textBuffer, char character, int caretIdIndex, bool log)
+{
+	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
+	Location loc = getLocationFromCaret(textBuffer, caretId);
+	
+	if (log)
+	{
+		log_add(&textBuffer->backingBuffer->history_2, -1, character,caretId,textBuffer->textBuffer_id);
+	}
+	appendCharacter(textBuffer->backingBuffer->buffer, caretId, character);
+	change_added(textBuffer->backingBuffer, loc, character);
+
+	markPreferedCaretXDirty(textBuffer, caretIdIndex);
+}
 
 internal void appendCharacter(TextBuffer *textBuffer, char character)
 {
@@ -893,84 +953,63 @@ internal void appendCharacter(TextBuffer *textBuffer, char character)
 internal bool removeCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log)
 {
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
-	Location loc;
-	if(log)
-		loc= getLocationFromCaret(textBuffer, caretId);
+	Location loc= getLocationFromCaret(textBuffer, caretId);
+
+
 	char toBeRemoved = *get(textBuffer->backingBuffer->buffer, caretId, dir_left);
 	bool removed = removeCharacter(textBuffer->backingBuffer->buffer, caretId);
+	if(removed)change_removed(textBuffer->backingBuffer, loc, toBeRemoved);
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
 	if (removed && log)
 	{
-		logRemoved(textBuffer, toBeRemoved, caretIdIndex,loc );
+		log_remove(&textBuffer->backingBuffer->history_2, -1, toBeRemoved, caretId, textBuffer->textBuffer_id);
 	}
 	return removed;
 }
 
-internal void removeCharacter(TextBuffer *textBuffer, bool log)
+Location push_valid(BackingBuffer *backingBuffer, Location location)
 {
-	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
+	if (location.column >= getLineLength(backingBuffer, location.line))
 	{
-		removeCharacter(textBuffer, i, log);
+		location.column = 0;
+		++location.line;
 	}
-	setNoSelection(textBuffer, log ? do_log : no_log);
-	removeOwnedEmptyCarets(textBuffer);
+	if (location.column < 0)
+	{
+		location.column = getLineLength(backingBuffer, location.line - 1);
+		--location.line;
+	}
+	return location;
 }
 
-internal void unDeleteCharacter(TextBuffer *textBuffer,  char character, int caretIdIndex)
+internal void unDeleteCharacter(TextBuffer *textBuffer,  char character, int caretIdIndex,bool log)
 {
-	//NOTE: this is not ment for user interaciton strictly for undoing 
-	//previous deletes. As such we do not need to check that the following state is OK.
-	invDelete(textBuffer->backingBuffer->buffer, textBuffer->ownedSelection_id.start[caretIdIndex], character);
-}
-
-internal void unDeleteCharacter(TextBuffer *textBuffer, char character)
-{
-	removeSelection(textBuffer);
-	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
-	{
-		unDeleteCharacter(textBuffer, i, character);
-	}
-	setNoSelection(textBuffer,no_log); //right log??
+	int cursor_id = textBuffer->ownedCarets_id.start[caretIdIndex];
+	Location loc = getLocationFromCaret(textBuffer, cursor_id);
+	invDelete(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[caretIdIndex], character);
+	if(log)log_add(&textBuffer->backingBuffer->history_2, 1, character, cursor_id, textBuffer->textBuffer_id);
+	--loc.column;
+	loc = push_valid(textBuffer->backingBuffer, loc);
+	change_added(textBuffer->backingBuffer, loc, character);
 }
 
 internal bool deleteCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log)
 {
 
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
-	Location loc;
-	if(log) loc = getLocationFromCaret(textBuffer, caretId);
 	char toBeDeleted = *get(textBuffer->backingBuffer->buffer, caretId, dir_right);
 	bool deleted = del(textBuffer->backingBuffer->buffer, caretId);
+	{ // buffer changes
+		Location loc = getLocationFromCaret(textBuffer, caretId);
+		++loc.column;
+		loc = push_valid(textBuffer->backingBuffer, loc);
+		if (deleted) change_removed(textBuffer->backingBuffer, loc, toBeDeleted);
+	}
 	if (deleted && log)
 	{
-		logDeleted(textBuffer, toBeDeleted, caretIdIndex, loc);
+		log_remove(&textBuffer->backingBuffer->history_2, 1, toBeDeleted, caretId, textBuffer->textBuffer_id);
 	}
 	return deleted;
-}
-
-internal void deleteCharacter(TextBuffer *textBuffer, bool log)
-{
-	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
-	{
-		deleteCharacter(textBuffer, i, log);
-	}
-	setNoSelection(textBuffer, log? do_log: no_log);
-	removeOwnedEmptyCarets(textBuffer);
-}
-
-
-internal bool remove(TextBuffer *textbuffer, bool log, Direction direction, int caretIdIndex)
-{
-	if (direction == dir_left)
-	{
-		return removeCharacter(textbuffer, caretIdIndex, log);
-	}
-	if (direction == dir_right)
-	{
-		return deleteCharacter(textbuffer, caretIdIndex, log);
-	}
-	assert(false);
-	return false;
 }
 
 // ---MOVE---
@@ -1095,7 +1134,9 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, boo
 			if (mgb_moveLeft(mgb, caretId))
 			{
 				if (log)
-					logMoved(textBuffer, dir, false, caretId, loc);
+				{
+					log_move(&textBuffer->backingBuffer->history_2, -1, caretId, textBuffer->textBuffer_id);
+				}
 				success = true;
 			}
 	}
@@ -1105,7 +1146,9 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, boo
 			if (mgb_moveRight(mgb, caretId))
 			{
 				if (log)
-					logMoved(textBuffer, dir, false, caretId, loc);
+				{
+					log_move(&textBuffer->backingBuffer->history_2, 1, caretId, textBuffer->textBuffer_id);
+				}
 				success = true;
 			}
 	}
@@ -1209,25 +1252,6 @@ internal void moveWhile(TextBuffer *textBuffer, select_	selection, log_ log, boo
 	removeOwnedEmptyCarets(textBuffer);
 }
 
-internal void removeWhile(TextBuffer *textBuffer, bool log, Direction dir, bool(*func)(char, int *))
-{
-	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
-	{
-		int state = 0;
-		int caretId = textBuffer->ownedCarets_id.start[i];
-		while (func(charAtDirOfCaret(textBuffer->backingBuffer->buffer, dir, caretId), &state))
-		{
-			if (!remove(textBuffer, log, dir, i))
-			{
-				break;
-			}
-		}
-		markPreferedCaretXDirty(textBuffer, i);
-	}
-	removeOwnedEmptyCarets(textBuffer);
-}
-
-
 internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex, bool up)
 {
 	setPreferedX(textBuffer, caretIdIndex);
@@ -1330,7 +1354,7 @@ internal char *getInitialCharacter(MultiGapBuffer *buffer)
 
 // ---- stb TrueType stuff
 
-internal void setUpTT(stbtt_fontinfo *allocationInfo, char *font_path)
+internal void setUpTT(stbtt_fontinfo *font_info, char *font_path)
 {
 	long size;
 	FILE* fontFile = fopen(font_path, "rb");
@@ -1344,7 +1368,7 @@ internal void setUpTT(stbtt_fontinfo *allocationInfo, char *font_path)
 	fontBuffer = (unsigned char*)alloc_(size,"fontBuffer");
 	fread(fontBuffer, size, 1, fontFile);
 	fclose(fontFile);
-	stbtt_InitFont(allocationInfo, fontBuffer, 0);
+	stbtt_InitFont(font_info, fontBuffer, 0);
 }
 
 internal int getGlyph(Typeface::Font *font, char32_t codepoint)
@@ -1545,19 +1569,16 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 	*buffer = {};
 	MultiGapBuffer *stringBuffer = (MultiGapBuffer *)Allocate(allocator, sizeof(MultiGapBuffer), "multi gap buffer");
 	buffer->allocator = allocator;
-	*stringBuffer = createMultiGapBuffer(initialMultiGapBufferSize);
-	History history = {};
-	history.entries = constructDynamicArray_HistoryEntry(initialHistoryEntrySize, "history", allocator);
-	history.branches = ORD_constructDynamicArray_HistoryBranch(initialHistoryEntrySize, "history branches", allocator);
-	history.change_log = constructDynamicArray_BufferChange(initialHistoryEntrySize, "history change log", allocator);
-	history.events = ORD_constructDynamicArray_HistoryEventMarker(initialHistoryEntrySize, "history event markers", allocator);
-	buffer->history = history;
+	*stringBuffer = createMultiGapBuffer(initialMultiGapBufferSize,allocator);
+	
+	buffer->history_2 = alloc_History(allocator);
+
 	buffer->buffer = stringBuffer;
 	buffer->commonBuffer.allocator = allocator_user;
 	buffer->commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
 	buffer->binding_next_change = DHDS_constructHT(PVOID, HistoryChangeTracker, 20, allocator);
-	buffer->ref_count = 0;
 	initLineSumTree(buffer, allocator);
+	buffer->textBuffers = constructDynamicArray_PTextBuffer(4,"textBuffers",allocator);
 	return buffer;
 }
 
@@ -1569,7 +1590,7 @@ global_variable HashTable_DHSTR_String_PBackingBuffer open_files = DHDS_construc
 
 void attatch_BackingBuffer(TextBuffer *textBuffer, BackingBuffer *backingBuffer)
 {
-	++backingBuffer->ref_count;
+	Add(&backingBuffer->textBuffers, textBuffer);
 	textBuffer->backingBuffer = backingBuffer;
 }
 
@@ -1578,8 +1599,17 @@ void attatch_BackingBuffer(TextBuffer *textBuffer, BackingBuffer *backingBuffer)
 void detach_BackingBuffer(TextBuffer *textBuffer)
 {
 	BackingBuffer *backingBuffer = textBuffer->backingBuffer;
-	--(backingBuffer->ref_count);
-	if (!backingBuffer->ref_count)
+	for (int i = 0; i < backingBuffer->textBuffers.length; i++)
+	{
+		if (textBuffer == backingBuffer->textBuffers.start[i])
+		{
+			Remove(&backingBuffer->textBuffers, i);
+			break;
+		}
+	}
+
+	
+	if (!backingBuffer->textBuffers.length)
 	{
 		bool hasRemoved;
 		remove(&open_files, backingBuffer->path, &hasRemoved);
@@ -1617,10 +1647,12 @@ internal bool get_backingBuffer(DHSTR_String file_name, BackingBuffer **_out_buf
 
 Typeface::Font LoadFont(DHSTR_String path)
 {
+
+
 	Typeface::Font ret = {};
-	ret.cachedBitmaps = DHDS_constructHT(ulli, CharBitmap, 256, default_allocator);
-	ret.cachedGlyphs = DHDS_constructHT(char32_t, int, 256, default_allocator);
-	ret.font_info = (stbtt_fontinfo *)Allocate(default_allocator, sizeof(stbtt_fontinfo), "fontinfo_info");
+	ret.cachedBitmaps = DHDS_constructHT(ulli, CharBitmap, 256, font_allocator);
+	ret.cachedGlyphs = DHDS_constructHT(char32_t, int, 256, font_allocator);
+	ret.font_info = (stbtt_fontinfo *)Allocate(font_allocator, sizeof(stbtt_fontinfo), "fontinfo_info");
 	ret.font_info->userdata = "stbtt internal allocation";
 	setUpTT(ret.font_info,DHSTR_UTF8_FROM_STRING(path,alloca));
 	stbtt_GetFontVMetrics(ret.font_info, &ret.ascent, &ret.descent, &ret.lineGap);
@@ -1758,31 +1790,33 @@ Typeface::Font *getFont(DHSTR_String name)
 }
 
 global_variable int running_textBuffer_id = 200;
-internal TextBuffer allocTextBuffer(int initialMultiGapBufferSize, int initialLineInfoSize,int initialColorChangeSize, int initialHistoryEntrySize)
+internal TextBuffer *allocTextBuffer(int initialMultiGapBufferSize, int initialLineInfoSize,int initialColorChangeSize, int initialHistoryEntrySize)
 {
 	//hold on are we not using the provided allocator???
 	DH_Allocator allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "textBuffer arena"));
 	DH_Allocator allocator_user = arena_allocator(allocateArena(KB(64), platform_allocator, "textBuffer user arena"));
-	TextBuffer textBuffer = {};
-	textBuffer.allocator = allocator;
-	textBuffer.initial_rendering_state.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
-	textBuffer.initial_rendering_state.scale = stbtt_ScaleForPixelHeight(textBuffer.initial_rendering_state.font->font_info, 14);
-	textBuffer.initial_rendering_state.color = (int)active_colorScheme.foregroundColor;
-	textBuffer.initial_rendering_state.background_color = (int)active_colorScheme.background_colors[0];
-	textBuffer.initial_rendering_state.highlight_color = 0;
+	
+	TextBuffer *textBuffer = (TextBuffer *)ALLOC(allocator, sizeof(TextBuffer));
+	*textBuffer = {};
+	textBuffer->allocator = allocator;
+	textBuffer->initial_rendering_state.font = getFont(DHSTR_MAKE_STRING("Arial Unicode"));
+	textBuffer->initial_rendering_state.scale = stbtt_ScaleForPixelHeight(textBuffer->initial_rendering_state.font->font_info, 14);
+	textBuffer->initial_rendering_state.color = (int)active_colorScheme.foregroundColor;
+	textBuffer->initial_rendering_state.background_color = (int)active_colorScheme.background_colors[0];
+	textBuffer->initial_rendering_state.highlight_color = 0;
 
 	//textBuffer.font = getFont(DHSTR_MAKE_STRING("Segoe UI Symbol"));
-	textBuffer.textBuffer_id = running_textBuffer_id++;
-	textBuffer.bufferType = regularBuffer;
-	textBuffer.KeyBindings = DHDS_constructDA(KeyBinding,20, allocator);
-	textBuffer.ownedCarets_id = DHDS_constructDA(int,20, allocator);
-	textBuffer.ownedSelection_id = DHDS_constructDA(int,20, allocator);
-	textBuffer.cursorInfo = DHDS_constructDA(CursorInfo,20, allocator);
-	textBuffer.contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook, 20, allocator);
-	textBuffer.renderingModifiers= DHDS_constructDA(RenderingModifier,20, allocator);
-	textBuffer.commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
-	textBuffer.commonBuffer.allocator = allocator_user;
-	textBuffer.rendering_changes = DHDS_ORD_constructDA(CharRenderingChange, 20, allocator);
+	textBuffer->textBuffer_id = running_textBuffer_id++;
+	textBuffer->bufferType = regularBuffer;
+	textBuffer->KeyBindings = DHDS_constructDA(KeyBinding,20, allocator);
+	textBuffer->ownedCarets_id = DHDS_constructDA(int,20, allocator);
+	textBuffer->ownedSelection_id = DHDS_constructDA(int,20, allocator);
+	textBuffer->cursorInfo = DHDS_constructDA(CursorInfo,20, allocator);
+	textBuffer->contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook, 20, allocator);
+	textBuffer->renderingModifiers= DHDS_constructDA(RenderingModifier,20, allocator);
+	textBuffer->commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
+	textBuffer->commonBuffer.allocator = allocator_user;
+	textBuffer->rendering_changes = DHDS_ORD_constructDA(CharRenderingChange, 20, allocator);
 	return textBuffer;
 }
 
@@ -1792,72 +1826,77 @@ void InsertCaret(TextBuffer *buffer, int pos, int index)  //for history reasons.
 
 	// why the fuck does it say WHAT here? //slightly older Daniel
 	// also what the fuck for history reasons, we havn't released anything dude.
+	// lol fuck me trying to be funny. History reasons is because of the history module hehe.
 
 	int id_sel = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
 	Insert(&buffer->ownedSelection_id, id_sel, index);
-	int id = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
+	int id = AddCaret(buffer->backingBuffer->buffer,buffer->textBuffer_id, pos);
 	Insert(&buffer->ownedCarets_id, id, index);
 	CursorInfo allocationInfo = {};
 	Insert(&buffer->cursorInfo, allocationInfo, index);
 }
 
-void AddCaret(TextBuffer *buffer, int pos)
+void AddCaret(TextBuffer *textBuffer, int pos)
 { 
-	int id_sel = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
-	Add(&buffer->ownedSelection_id, id_sel);
-	int id = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
-	Add(&buffer->ownedCarets_id, id);
-	logAddCaret(buffer, pos, pos, buffer->ownedCarets_id.length-1, getLocationFromCaret(buffer, id));
+	int id_sel = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, pos);
+	Add(&textBuffer->ownedSelection_id, id_sel);
+	int id = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, pos);
+	Add(&textBuffer->ownedCarets_id, id);
+	log_add_cursor(&textBuffer->backingBuffer->history_2, pos, false,  id, textBuffer->textBuffer_id);
+	log_add_cursor(&textBuffer->backingBuffer->history_2, pos, true, id_sel, textBuffer->textBuffer_id);
 	CursorInfo allocationInfo = {};
-	Add(&buffer->cursorInfo, allocationInfo);
+	Add(&textBuffer->cursorInfo, allocationInfo);
 }
 
-internal void removeCaret(TextBuffer *buffer, int caretIdIndex, bool log)
+internal void removeCaret(TextBuffer *textBuffer, int caretIdIndex, bool log)
 {
-	int pos_caret = getCaretPos(buffer->backingBuffer->buffer, buffer->ownedCarets_id.start[caretIdIndex]);
-	int pos_selection = getCaretPos(buffer->backingBuffer->buffer, buffer->ownedSelection_id.start[caretIdIndex]);
+	int pos_caret = getCaretPos(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[caretIdIndex]);
+	int pos_selection = getCaretPos(textBuffer->backingBuffer->buffer, textBuffer->ownedSelection_id.start[caretIdIndex]);
 	if (log)
-		logRemoveCaret(buffer, pos_caret, pos_selection, caretIdIndex, getLocationFromCaret(buffer, buffer->ownedSelection_id.start[caretIdIndex]));
+	{
+		log_remove_cursor(&textBuffer->backingBuffer->history_2,pos_caret,false, textBuffer->ownedCarets_id.start[caretIdIndex], textBuffer->textBuffer_id);
+		log_remove_cursor(&textBuffer->backingBuffer->history_2, pos_selection, true, textBuffer->ownedSelection_id.start[caretIdIndex], textBuffer->textBuffer_id);
+	}
 
-	removeCaret(buffer->backingBuffer->buffer, buffer->ownedCarets_id.start[caretIdIndex]);
-	RemoveOrd(&buffer->ownedCarets_id, caretIdIndex);
-	removeCaret(buffer->backingBuffer->buffer, buffer->ownedSelection_id.start[caretIdIndex]);
-	RemoveOrd(&buffer->ownedSelection_id, caretIdIndex);
+	removeCaret(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[caretIdIndex]);
+	RemoveOrd(&textBuffer->ownedCarets_id, caretIdIndex);
+	removeCaret(textBuffer->backingBuffer->buffer, textBuffer->ownedSelection_id.start[caretIdIndex]);
+	RemoveOrd(&textBuffer->ownedSelection_id, caretIdIndex);
 }
 
 
-internal TextBuffer createTextBufferFromBackingBuffer(BackingBuffer *backingBuffer, DHSTR_String file_name)
+internal TextBuffer *createTextBufferFromBackingBuffer(BackingBuffer *backingBuffer, DHSTR_String file_name)
 {
-	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
-	attatch_BackingBuffer(&textBuffer, backingBuffer);
-	textBuffer.fileName = file_name; //COPY ME??
-	initTextBuffer(&textBuffer); //setting user_specified_bindings + adding the correct cursors
+	TextBuffer *textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
+	attatch_BackingBuffer(textBuffer, backingBuffer);
+	textBuffer->fileName = file_name; //COPY ME??
+	initTextBuffer(textBuffer); //setting user_specified_bindings + adding the correct cursors
 	return textBuffer;
 }
 
-internal TextBuffer cloneTextBuffer(TextBuffer *buffer)
+internal TextBuffer *cloneTextBuffer(TextBuffer *buffer)
 {
 	return createTextBufferFromBackingBuffer(buffer->backingBuffer, buffer->fileName);
 }
 
 
-internal void freeTextBuffer(TextBuffer buffer)
+internal void freeTextBuffer(TextBuffer *buffer)
 {
-	if(buffer.backingBuffer)
-		detach_BackingBuffer(&buffer);
-	arena_deallocate_all(buffer.allocator);
-	arena_deallocate_all(buffer.commonBuffer.allocator);
+	if(buffer->backingBuffer)
+		detach_BackingBuffer(buffer);
+	arena_deallocate_all(buffer->allocator);
+	arena_deallocate_all(buffer->commonBuffer.allocator);
 }
 
 
 
-internal TextBuffer openCommanLine()
+internal TextBuffer *openCommanLine()
 {
-	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 200, 200);
-	textBuffer.bufferType = commandLineBuffer;
-	textBuffer.backingBuffer = allocBackingBuffer(200, 200);
-
-	initTextBuffer(&textBuffer);
+	TextBuffer *textBuffer = allocTextBuffer(2000, 2000, 200, 200);
+	textBuffer->bufferType = commandLineBuffer;
+	BackingBuffer *backingBuffer = allocBackingBuffer(200, 200);
+	attatch_BackingBuffer(textBuffer, backingBuffer);
+	initTextBuffer(textBuffer);
 	return textBuffer;
 }
 
@@ -1866,20 +1905,21 @@ internal TextBuffer openCommanLine()
 // now we're returning garbage... oh here's a pointer to free_d mem
 // do what you will... It's not very good at all..
 
-internal TextBuffer openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
+internal TextBuffer *openFileIntoNewBuffer(DHSTR_String fileName, bool *success)
 {
-	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
 	BackingBuffer *bb;
 	*success = get_backingBuffer(fileName, &bb);
 	if(*success)
 	{
-		attatch_BackingBuffer(&textBuffer, bb);
-		textBuffer.fileName = fileName; //WE'RE totaly leaking this.
-		initTextBuffer(&textBuffer); //setting user_specified_bindings
+		TextBuffer *textBuffer = allocTextBuffer(2000, 2000, 2000, 20);
+		attatch_BackingBuffer(textBuffer, bb);
+		DH_Allocator macro_used_allocator = textBuffer->allocator;
+
+		textBuffer->fileName = DHSTR_CPY(fileName,ALLOCATE); 
+		initTextBuffer(textBuffer); //setting user_specified_bindings
 		return textBuffer;
 	} else
 	{
-		freeTextBuffer(textBuffer);
 		return{};
 	}
 }
@@ -1918,18 +1958,18 @@ internal void hideCommandLine(Data *data)
 	data->isCommandlineActive = false;
 }
 
-
+#if 0
 internal void createFile(Data *data, DHSTR_String name)
 {
-	TextBuffer textBuffer = allocTextBuffer(2000, 2000, 2000, 2000);
-	textBuffer.fileName = name;
-	initTextBuffer(&textBuffer);
+	TextBuffer *textBuffer = allocTextBuffer(2000, 2000, 2000, 2000);
+	textBuffer->fileName = name;
+	initTextBuffer(textBuffer);
 	Add(&data->textBuffers, textBuffer);
 	saveFile(&textBuffer);
 	data->updateAllBuffers = true;
 	hideCommandLine(data);
 }
-
+#endif
 // ----	colors
 
 internal int grayScaleToColor(uint8 org, int foregroundColor, int backgroundColor)
@@ -2279,7 +2319,7 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 	int bleed_extra_per_row = ciel_divide((ARRAY_LENGTH(subpix_bleed) - 1) * 2, 3);
 	int color_stride = (ciel_divide(width + 2, 3) + bleed_extra_per_row) + 1;
 
-	uint8_t *new_mem = (uint8_t *)alloc_(color_stride * 3 * height, "character bitmap");
+	uint8_t *new_mem = (uint8_t *)Allocate(font_allocator,color_stride * 3 * height, "character bitmap");
 	memset(new_mem, 0, color_stride * 3 * height);
 	uint8_t *row_from = (uint8_t *)charBitmapMem;
 	uint8_t *colors[3] =
@@ -2309,7 +2349,7 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 		row_from += width;
 	}
 
-	free_(charBitmapMem); 
+	STBTT_free(charBitmapMem,"");
 	CharBitmap b = {};
 	b.character = codepoint;
 	b.scale = scale;
@@ -2460,7 +2500,6 @@ internal MGB_Iterator iteratorFromLocation(BackingBuffer *backingBuffer, Locatio
 	return getIterator(backingBuffer->buffer, start+loc.column);
 }
 
-
 #if 0
 internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine,int x,int y,bool drawCaret)
 {
@@ -2583,6 +2622,8 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine,in
 */
 internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startLine, int x, int y, bool drawCaret)
 {
+	//nothing on last line.. like wut?
+
 	MGB_Iterator it = iteratorFromLine(textBuffer->backingBuffer, startLine);
 
 	int orgX = x;
@@ -2622,7 +2663,7 @@ internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startL
 				current_loc.column = 0;
 			}
 			else
-				++current_loc.column;
+				current_loc.column+=read;
 			{
 				int width = 0;
 				if (last_codepoint != 0) {
@@ -2657,30 +2698,10 @@ internal void renderBackground(TextBuffer *textBuffer, Bitmap bitmap, int startL
 			rendering = apply_rendering_changes_at(textBuffer, current_loc, rendering);
 		}
 	}
+	//works for now.. probs wrong
+	renderRect(bitmap, 0, rendering.y, bitmap.width, bitmap.height-rendering.y, rendering.highlight_color ? rendering.highlight_color : rendering.background_color);
 }
 
-internal void mark_selection(void *view_handle)
-{
-	TextBuffer *textBuffer = (TextBuffer *)view_handle;
-	if (has_move_changed(textBuffer->backingBuffer, &mark_selection))
-	{
-		remove_rendering_changes(textBuffer, &mark_selection);
-		for (int i = 0; i < min(textBuffer->ownedCarets_id.length, textBuffer->ownedSelection_id.length);i++)
-		{
-			Location Loc_a = getLocationFromCaret(textBuffer, textBuffer->ownedSelection_id.start[i]);
-			Location Loc_b = getLocationFromCaret(textBuffer, textBuffer->ownedCarets_id.start[i]);
-			int cmp = cmp_Location(&Loc_a, &Loc_b);
-			if (cmp < 0)
-			{
-				change_rendering_highlight_color(textBuffer, Loc_a, Loc_b, active_colorScheme.highlightColor, &mark_selection);
-			}
-			else if (cmp > 0)
-			{
-				change_rendering_highlight_color(textBuffer, Loc_b, Loc_a, active_colorScheme.highlightColor, &mark_selection);
-			}
-		}
-	}
-}
 
 
 
@@ -2725,7 +2746,7 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 				current_loc.column = 0;
 			}
 			else
-				++current_loc.column;
+				current_loc.column+=read;
 			{
 				int width = 0;
 				if (last_codepoint != 0){
@@ -2758,7 +2779,6 @@ internal void renderText(TextBuffer *textBuffer, Bitmap bitmap, int startLine, i
 			rendering = apply_rendering_changes_at(textBuffer, current_loc, rendering);
 		}
 		bool onCaret = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedCarets_id, it);
-		bool onSelection = HasCaretAtIterator(textBuffer->backingBuffer->buffer, &textBuffer->ownedSelection_id, it);
 		if (drawCaret && onCaret) // final caret.
 		{
 			int width = 0;
@@ -2829,10 +2849,10 @@ Rect next_rect_in_grid(Bitmap bitmap, Rect r, int dir_x, int dir_y)
 	r.x += r.width*dir_x;
 	r.y += r.height*dir_y;
 
-	clamp(r.x, 0, bitmap.width);
-	clamp(r.y, 0, bitmap.height);
-	clamp(r.width, 0, bitmap.width - r.x);
-	clamp(r.height, 0, bitmap.height - r.y);
+	r.x = clamp(r.x, 0, bitmap.width);
+	r.y = clamp(r.y, 0, bitmap.height);
+	r.width = clamp(r.width, 0, bitmap.width - r.x);
+	r.height = clamp(r.height, 0, bitmap.height - r.y);
 	return r;
 }
 
@@ -2932,7 +2952,7 @@ internal void renderCommandLine(Bitmap bitmap, Data data)
 	{
 		MenuItem item = data.menu.items.start[i];
 		r = next_rect_in_grid(bitmap, r, 0, 1);
-		renderRect(bitmap, r, (int)active_colorScheme.background_colors[1]);
+		renderRect(bitmap, r, data.menu.active_item == (i+1) ? (int)active_colorScheme.active_color:(int)active_colorScheme.background_colors[1]);
 		renderText(subBitmap(bitmap, r),item.name, rendering.scale, rendering.color,0, 0, rendering.font);
 	}
 }
@@ -3096,8 +3116,13 @@ internal bool stripInitialWhite(MultiGapBuffer *buffer, MGB_Iterator *it, int *c
 //this one should come from the dll
 struct API;
 
-void(*setBindingsLocal)(API api, void *view_handle);
+void(*setBindingsLocal)(void *view_handle);
 #include "api.cpp"
+
+void mark_selection(void *handle)
+{
+
+}
 
 //TODO Merge reload textbuffer and init?
 internal void initTextBuffer(TextBuffer *textBuffer)
@@ -3109,7 +3134,6 @@ internal void initTextBuffer(TextBuffer *textBuffer)
 	int caret_s = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, 0);
 	Add(&textBuffer->ownedSelection_id, caret_s);
 	_setLocalBindings(textBuffer);
-	getAPI().callbacks.registerCallBack(callback_pre_render, textBuffer, mark_selection);
 }
 
 internal void renderScroll(TextBuffer *textBuffer, Bitmap bitmap)
@@ -3134,7 +3158,7 @@ internal void renderInfoBar(TextBuffer *buffer, Bitmap bitmap, float scale, int 
 	char string[400];
 	//int pos = getLeftCaretIndex(&buffer->backingBuffer->buffer);
 	Location loc = getLocationFromCaret(buffer, buffer->ownedCarets_id.start[0]);
-	sprintf(string, "history_index: %d, loc:(%d:%d)\t mem:%dkb\t memBlocks:%d @%0.2f \t %s%s", buffer->backingBuffer->history.current_index, loc.line,loc.column, memoryConsumption/1024,blocks.length, memoryEffectivity, "font_name", "font_style");
+	sprintf(string, "history_index: %d, loc:(%d:%d)\t memBlocks:%d \t", buffer->backingBuffer->history_2.state.location.prev_instruction_index+1, loc.line,loc.column, blocks.length);
 	
 	// bad, these allocations are completely unnessesary.. (and the only two we do every frame)
 	DHSTR_String allocationInfo = DHSTR_MERGE_MULTI(alloca, DHSTR_MAKE_STRING(string), buffer->fileName);
@@ -3304,7 +3328,6 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 		freeLexer(lexer);
 		free_(identifiers.start);
 		identifiers.start = 0;
-#endif
 	}
 	else if (buffer->bufferType == HistoryBuffer)
 	{
@@ -3378,6 +3401,7 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 		};
 
 		renderTree(bitmap, &buffer->backingBuffer->history.entries.start[0], bitmap.width / 2, 0, buffer->initial_rendering_state.font, nodeInterface, &buffer->backingBuffer->history);
+#endif
 	}
 	else
 	{
@@ -3388,18 +3412,16 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 //clearly out of place 
 internal char *getRestAsString(MultiGapBuffer *buffer, MGB_Iterator it)
 {
+	MoveIterator(buffer, &it, -1);
 	int counter=0;
 	MGB_Iterator itCopy = it;
-	do {//the stupidity is strong in this one
-		counter++;
-	} while (getNext(buffer, &itCopy));
+	while (getNext(buffer, &itCopy)) counter++;
 
 	char *pointer = (char *)alloc_((counter+1)* sizeof(char),"getRestAsString");
 	
 	int i = 0; 
-	do {
-		pointer[i++]= *getCharacter(buffer,it);
-	} while (getNext(buffer, &it));
+	while (getNext(buffer, &it))
+		pointer[i++] = *getCharacter(buffer, it);
 	pointer[i++] = '\0';
 
 	return pointer;
@@ -3420,7 +3442,7 @@ bool getActiveBuffer(Data *data, TextBuffer **activeBuffer_out)
 		}
 		else
 		{
-			*activeBuffer_out = &data->textBuffers.start[data->activeTextBufferIndex];
+			*activeBuffer_out = data->textBuffers.start[data->activeTextBufferIndex];
 		}
 	}
 	return true;
@@ -3584,13 +3606,14 @@ internal Bitmap layout(Bitmap bitmap,int length, int index)
 
 void render_and_advance(Bitmap bitmap, char **ptr)
 {
-	int index = (TextBuffer *)*ptr - global_data->textBuffers.start;
-	renderScreen((TextBuffer *)*ptr, bitmap, 5, 0, index == global_data->activeTextBufferIndex, true);
-	*ptr +=sizeof(TextBuffer);
+	static Typeface::Font *f = 0;
+	int index = (TextBuffer **)*ptr - global_data->textBuffers.start;
+	renderScreen(*(TextBuffer **)*ptr, bitmap, 5, 0, index == global_data->activeTextBufferIndex, true);
+	*ptr +=sizeof(TextBuffer *);
 	{//draw the index 
 		char buffer[50];
 		sprintf(buffer, "%d", index+1);
-		Typeface::Font *f = getFont(DHSTR_MAKE_STRING("Times New Roman"));
+		if(!f) f= getFont(DHSTR_MAKE_STRING("Times New Roman"));
 		float scale = 0.02f;
 		renderText(bitmap, DHSTR_MAKE_STRING(buffer), scale, (int)active_colorScheme.active_color, 1, 0, f);
 	}
@@ -3608,7 +3631,6 @@ void reload_textBuffer(TextBuffer *textBuffer)
 	clear(&textBuffer->commonBuffer.bindingMemory);
 	clear(&textBuffer->backingBuffer->commonBuffer.bindingMemory);
 	_setLocalBindings(textBuffer);
-	getAPI().callbacks.registerCallBack(callback_pre_render, textBuffer, mark_selection);
 	textBuffer->rendering_changes.length = 0;
 }
 
@@ -3618,7 +3640,7 @@ void reload_dll()
 {
 	static uint64_t last_dll_time = 0;
 	
-	{//loading bindings api
+	//loading bindings api
 	 //windows code...
 		HANDLE hfile = CreateFile("Bindings.dll", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 		
@@ -3642,18 +3664,17 @@ void reload_dll()
 			int err = GetLastError();
 
 			DLL = LoadLibrary("Bindings_tmp.dll");
-			setBindingsLocal = (void(*)(API, void *))GetProcAddress(DLL, "setBindingsLocal");
+			setBindingsLocal = (void(*)(void *))GetProcAddress(DLL, "setBindingsLocal");
 
 			ColorScheme(*get_colorScheme)() = (ColorScheme(*)())GetProcAddress(DLL, "get_colorScheme");
 			active_colorScheme = get_colorScheme();
 			for (int i = 0; i < global_data->textBuffers.length; i++)
 			{
-				reload_textBuffer(&global_data->textBuffers.start[i]);
+				reload_textBuffer(global_data->textBuffers.start[i]);
 			}
 			reload_textBuffer(global_data->commandLine);
 
 		}
-	}
 }
 
 
@@ -3683,7 +3704,7 @@ internal void renderFrame(Data *pdata, Bitmap bitmap, uint64_t microsStart)
 		else if (data.textBuffers.length > data.activeTextBufferIndex && data.activeTextBufferIndex >= 0)
 		{
 			Bitmap subBitmap = layout(bitmap, data.textBuffers.length, data.activeTextBufferIndex);
-			TextBuffer *textBuffer = (data.textBuffers.start + data.activeTextBufferIndex);
+			TextBuffer *textBuffer = data.textBuffers.start[data.activeTextBufferIndex];
 			bool drawCaret = ((microsStart - textBuffer->lastAction) / 1000 < 100) 
 				|| ((((int)((microsStart-textBuffer->lastAction) * blinkTimePerS) / 1000000) % 2) == 0);
 			

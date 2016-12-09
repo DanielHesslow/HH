@@ -54,7 +54,7 @@ void _insert_space(DynamicArray_void *arr, int index, size_t type_size)
 }
 
 #define DHDS_constructDA(type, initialCapacity,allocator) constructDynamicArray_##type(initialCapacity,DHMA_LOCATION,allocator)
-#define DHDS_ORD_constructDA(type, initialCapacity,allocator) ORD_constructDynamicArray_##type(initialCapacity, DHMA_LOCATION,allocator)
+#define DHDS_ORD_constructDA(type, initialCapacity, allocator) ORD_constructDynamicArray_##type(initialCapacity, DHMA_LOCATION, allocator)
 
 // typesafe dynamic arrays wrappers
 #define DEFINE_DynamicArray(type)		\
@@ -264,7 +264,7 @@ ORD_DynamicArray_##type ORD_DynamicArrayFromFixedSize(type *tree, int length, co
 \
 ORD_DynamicArray_##type ORD_constructDynamicArray_##type(int initialCapacity, const char*allocationInfo,DH_Allocator allocator = default_allocator)	\
 {\
-	return *(ORD_DynamicArray_##type *) &constructDynamicArray_##type(initialCapacity, allocationInfo); \
+	return *(ORD_DynamicArray_##type *) &constructDynamicArray_##type(initialCapacity, allocationInfo,allocator); \
 }
 #define DEFINE_Complete_ORD_DynamicArray(type, comparator)\
 DEFINE_DynamicArray(type)\
@@ -352,13 +352,13 @@ value_type *insert(HashTable_##key_type##_##value_type *hashtable, key_type key,
 	int iterations =0;\
 	for(int i = 0; i< hashtable->capacity; i++)\
 	{\
-		assert(index >=0 && index < hashtable->capacity);\
+		assert(index < hashtable->capacity);\
 		++iterations;\
 		if(hashtable->buckets[index].state != bucket_state_occupied|| key_equality_func(hashtable->buckets[index].key, key)) {--hashtable->length; break;} \
 		++index;\
 		index %= hashtable->capacity;\
 	}\
-	assert(index >=0 && index < hashtable->capacity);\
+	assert(index < hashtable->capacity);\
 	HashBucket_##key_type##_##value_type bucket = {};\
 	bucket.state = bucket_state_occupied;\
 	bucket.key = key;\

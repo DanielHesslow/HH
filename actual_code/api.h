@@ -4,6 +4,8 @@
 
 
 
+
+
 #ifdef TYPE_SAFETY
 struct ViewHandle
 {
@@ -57,8 +59,6 @@ struct ViewIterator
 
 
 typedef void(*StringFunction)(char *string_remaining, int string_length, void **user_data);
-	
-#define ALL_CURSORS -1
 
 #define FOR_CURSORS(iterator,api,view_handle) for(int iterator = 0;iterator<api.cursor.number_of_cursors(view_handle);iterator++)
 
@@ -69,8 +69,6 @@ enum API_MoveMode
 	move_mode_byte,
 	move_mode_line,
 };
-
-
 
 
 struct RenderingState
@@ -89,7 +87,6 @@ enum BufferModes
 	buffer_mode_commandline = 0,
 	buffer_mode_defualt	    = 1,
 };
-
 
 struct API
 {
@@ -131,15 +128,13 @@ struct API
 	
 	struct
 	{
-		bool (*moveWhile)(ViewHandle view_handle, int direction, int cursor_index, bool select, bool(*function)(char character, void **user_data));
-		bool (*removeWhile)(ViewHandle view_handle, int direction, int cursor_index, bool(*function)(char character, void **user_data));
 		int  (*move)(ViewHandle view_handle, int direction, int cursor_index, bool select, API_MoveMode mode);
 		char (*get_byte)(ViewHandle handle, int cursor_index, int direction);
 		char32_t (*get_codepoint)(ViewHandle handle, int cursor_index, int direction);
 
 		bool (*moveToLocation)(ViewHandle view_handle, int cursor_index, bool select, int line, int column);
 
-		int  (*add)(ViewHandle view_handle, int line, int column);
+		int  (*add)(ViewHandle view_handle, Location location);
 		bool (*remove)(ViewHandle view_handle, int cursor_index);
 
 		void (*append_codepoint)(ViewHandle view_handle, int cursor_index, int direction, char32_t character);
@@ -187,16 +182,7 @@ struct API
 		bool(*save)(BufferHandle buffer_handle);
 	}buffer;
 	
-	struct
-	{
-		// do we need to be able to do this on an view basis?
-		// it might be sort of handy but it's the buffer that changes,
-		// any fuction that cares need to handle that?
-		bool (*next_change)(BufferHandle buffer_handle, void *function, BufferChange *bufferChange);
-		void (*mark_all_read)(BufferHandle buffer_handle, void *function);
-		bool (*has_moved)(BufferHandle buffer_handle, void *function);
-	}changes;
-
+	
 	struct
 	{
 		TextIterator (*make)(BufferHandle buffer_handle);
@@ -209,7 +195,8 @@ struct API
 
 	struct
 	{
-		Location (*from_iterator)(BufferHandle buffer_handle, TextIterator text_iterator);
+		Location(*from_iterator)(BufferHandle buffer_handle, TextIterator text_iterator);
+		Location (*from_cursor)(ViewHandle view_handle, int cursor);
 	}Location;
 	struct
 	{
@@ -217,10 +204,14 @@ struct API
 		int (*lineFromByteIndex)(BufferHandle buffer_handle, int byte_index);
 		BufferHandle (*openRedirectedCommandPrompt)(char *command, int command_length);
 
+		bool (*get_active_menu_item)(API_MenuItem *_out_MenuItem);
 		void (*move_active_menu)(int dir);
 		void (*disable_active_menu)();
 		void (*addMenuItem)(API_MenuItem item);
 		void (*sortMenu)(int(*cmp)(API_MenuItem a, API_MenuItem b, void *user_data), void *user_data);
+		void (*clearMenu)();
+		void(*undo)(ViewHandle handle);
+		void(*redo)(ViewHandle handle);
 	}misc;
 
 	struct
@@ -231,18 +222,9 @@ struct API
 
 	struct
 	{
-
-	}_internal;
-
-	struct
-	{
 		void(*copy) (ViewHandle view_handle);
 		void(*paste)(ViewHandle view_handle);
 		void(*cut)  (ViewHandle view_handle);
 	}clipboard;
 };
-
-//API getAPi();
-//#include "api.cpp"
-
 #endif

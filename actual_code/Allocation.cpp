@@ -13,8 +13,7 @@ global_variable char *memChunk;
 DEFINE_DynamicArray(Allocation);
 global_variable DynamicArray_Allocation blocks;
 
-global_variable int memoryConsumption = 0;
-global_variable float memoryEffectivity = 0;
+
 
 #if 1
 
@@ -25,16 +24,6 @@ char *blockEnd(Allocation block)
 	return block.start + block.length;
 }
 
-void calcEffectivity()
-{
-	//erm what the flying fuck?
-	int sum = 0;
-	for (int i = 0; i < blocks.length; i++)
-	{
-		sum += blocks.start[i].length;
-	}
-	memoryEffectivity = (float)sum / (float)memoryConsumption;
-}
 
 
 void *alloc_(size_t memorySize, void *allocationInfo, void *owner) 
@@ -89,8 +78,6 @@ void *alloc_(size_t memorySize, void *allocationInfo, void *owner)
 	block.length = memorySize;
 	block.allocationInfo = (char *)allocationInfo;
 	Add(&blocks, block);
-	memoryConsumption = blockEnd(block) - memChunk;
-	calcEffectivity();
 
 	return block.start;
 }

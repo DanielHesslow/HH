@@ -75,6 +75,8 @@ Location move_right(TextBuffer *textBuffer, Location loc)
 	return loc;
 }
 
+internal void update_markup(TextBuffer *textBuffer);
+
 void addChangeEvent(TextBuffer *textBuffer, HistoryEntry entry)
 {
 	Location loc = entry.location;
@@ -101,6 +103,7 @@ void addChangeEvent(TextBuffer *textBuffer, HistoryEntry entry)
 	ch.location = loc;
 	ch.character = entry.character;
 	Add(&textBuffer->backingBuffer->history.change_log, ch);
+	update_markup(textBuffer);
 }
 
 HistoryEntry invert_event(HistoryEntry prev_entry)

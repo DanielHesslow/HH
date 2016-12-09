@@ -28,17 +28,18 @@ struct MultiGapBuffer
 {
 	char *start;
 	DynamicArray_BufferBlock blocks;
-	int length;
+	int capacity;
 	int running_cursor_id;
 	DynamicArray_CursorIdentifier cursor_ids;
+	DH_Allocator allocator;
 };
 
 internal char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it);
 internal int get(MultiGapBuffer *buffer, char *character);
 internal char *get(MultiGapBuffer *buffer, int pos);
 internal char *get(MultiGapBuffer *buffer, int caretId, Direction dir);
-internal MultiGapBuffer createMultiGapBuffer(int size);
-internal void freeMultiGapBuffer(MultiGapBuffer *buffer);
+//internal MultiGapBuffer createMultiGapBuffer(int size);
+//internal void freeMultiGapBuffer(MultiGapBuffer *buffer);
 internal int length(MultiGapBuffer *buffer);
 internal int getIteratorPos(MultiGapBuffer *buffer, MGB_Iterator it);
 internal int getCaretPos(MultiGapBuffer *buffer, int caretId);
@@ -48,7 +49,6 @@ internal bool getNext(MultiGapBuffer *buffer, MGB_Iterator *it);
 internal bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it);
 internal int indexFromId(MultiGapBuffer *buffer, int id);
 internal MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id);
-internal void getSurroundingGap(MultiGapBuffer *buffer, int index, int *prevGap, int *nextGap);
 internal int AddCaret(MultiGapBuffer *buffer,int textBuffer_index, int i);
 internal bool del(MultiGapBuffer *buffer, int caretId);
 internal int posFromId(MultiGapBuffer *buffer, int caretId);

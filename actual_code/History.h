@@ -12,11 +12,6 @@
 
 
 
-enum Direction
-{
-	dir_right,
-	dir_left,
-};
 
 struct HistoryEntry
 {
@@ -67,19 +62,12 @@ struct HistoryEventMarker
 DEFINE_Complete_SparseArray(HistoryBranch);
 DEFINE_Complete_SparseArray(HistoryEventMarker);
 
-enum HistoryChangeType
-{
-	HistoryChange_do, //or redo
-	HistoryChange_undo,
-};
-
-
 DEFINE_DynamicArray(BufferChange);
 
 struct History
 {
-	DynamicArray_HistoryEntry entries;
-	DynamicArray_BufferChange change_log; //undos and redos are also saved here.. as references to the entries
+	DynamicArray_HistoryEntry entries;    //history
+	DynamicArray_BufferChange change_log; //highlevel changes of the buffer, what we can listen to.
 	int current_index;
 	ORD_DynamicArray_HistoryBranch branches; // as a sparse array
 	ORD_DynamicArray_HistoryEventMarker events; // as a sparse array

@@ -3,18 +3,15 @@
 #include <cstdio>
 #include "Allocation.h"
 
+
+#define PAGES 800;
+
 //technically KiB, MiB, Gib but I don't fucking care
 #define KB(value)(1024*value)
 #define MB(value)(1024*KB(value))
 #define GB(value)(1024*MB(value))
 
-#define STBTT_STATIC
-#define STB_TRUETYPE_IMPLEMENTATION 
-#define STBTT_malloc(x,u) alloc_(x,u)
-#define STBTT_free(x,u) free_(x)
-#define STBTT_strlen(x) strlen(x);
 
-#include "..\\libs\\stb_truetype.h" 
 #define STB_IMAGE_IMPLEMENTATION 
 #include "..\\libs\\stb_image.h" 
 
@@ -35,7 +32,7 @@ void *platform_alloc(size_t bytes_to_alloc)
 #ifdef fixed_mem
 	return VirtualAlloc(addresses[ind++], bytes_to_alloc, MEM_RESERVE |MEM_COMMIT, PAGE_READWRITE);
 #else 
-	return VirtualAlloc(NULL, bytes_to_alloc, MEM_COMMIT, PAGE_READWRITE);
+	return VirtualAlloc(NULL, bytes_to_alloc, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
 #endif
 }
 
@@ -316,15 +313,13 @@ static void GetOutlineMetrics(HDC hdc)
 	GlobalFree(buffer);
 }
 
-
 void loadFonts() 
 {
 	static const LPCSTR fontRegistryPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
 	HKEY hKey;
 	LONG result;
 
-
-	DH_Allocator macro_used_allocator = default_allocator;
+	DH_Allocator macro_used_allocator = stack_allocator;
 
 	result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, fontRegistryPath, 0, KEY_READ, &hKey);
 	if (result != ERROR_SUCCESS) {
@@ -378,7 +373,7 @@ void loadFonts()
 		Insert(&availableFonts, typeface, ordered_insert_dont_care);
 	} while (result != ERROR_NO_MORE_ITEMS);
 	RegCloseKey(hKey);
-
+#if 0
 	//merge fonts into typefaces
 	int base=0;
 	int c=1;
@@ -408,8 +403,7 @@ void loadFonts()
 			base = i;
 		}
 	}
-
-	return;
+#endif
 }
 
 
@@ -506,7 +500,7 @@ WinMain(HINSTANCE instance,
 
 	//textBuffer = openFileIntoNewBuffer(u"notes.txt", &success);
 	//textBuffer.fileName = u"hello.c";
-	DynamicArray_TextBuffer textBuffers = DHDS_constructDA(TextBuffer,2, default_allocator);
+	DynamicArray_PTextBuffer textBuffers = DHDS_constructDA(PTextBuffer,2, default_allocator);
 	
 	loadFonts();
 
@@ -514,14 +508,12 @@ WinMain(HINSTANCE instance,
 	
 	Data data = {};
 	data.textBuffers = textBuffers;
-	TextBuffer *buffer = (TextBuffer *) alloc_(sizeof(TextBuffer), "commandLineBuffer struct");
-	*buffer = openCommanLine();
+	TextBuffer *buffer= openCommanLine();
 	data.commandLine = buffer;
 	data.activeTextBufferIndex = 0;
 	data.menu = {};
 	data.menu.allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "menu user arena"));
 	data.menu.items = DHDS_constructDA(MenuItem, 50, default_allocator);
-	
 	//Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
 	//Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
 

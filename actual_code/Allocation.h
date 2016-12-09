@@ -13,5 +13,21 @@ struct Allocation
 	char *allocationInfo;
 };
 
+struct DH_Allocator
+{
+	void *(*alloc)(size_t bytes_to_alloc, void *allocation_info, void *data);
+	void(*free)(void *mem_to_free, void *data);
+	void *data;
+};
+
+void *Allocate(DH_Allocator allocator, size_t bytes_to_alloc, void *allocation_info)
+{
+	return allocator.alloc(bytes_to_alloc, allocation_info, allocator.data);
+}
+
+void DeAllocate(DH_Allocator allocator, void *mem)
+{
+	allocator.free(mem, allocator.data);
+}
 
 #endif
