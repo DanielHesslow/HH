@@ -5,7 +5,7 @@
 
 #define HEADER_ONLY
 //#include "api.h"
-#include "api_2.h"
+#include "api.h"
 #include "header.h"
 
 struct CommandInfo
@@ -969,7 +969,7 @@ external bool menu_get_active(API_MenuItem *_out_MenuItem)
 		return true;
 	}
 }
-#include "History_2.h"
+#include "History.h"
 
 external void undo (ViewHandle handle)
 {
@@ -981,107 +981,21 @@ external void undo (ViewHandle handle)
 external void redo(ViewHandle handle)
 {
 	TextBuffer *tb = (TextBuffer *)handle;
-	int branches = num_branches(&tb->backingBuffer->history_2, tb->backingBuffer->history_2.state.location);
-	redo(tb->backingBuffer,branches-1);
+	redo(tb->backingBuffer);
 }
 
-
-
-
-#if 0
-external API getAPI()
+external void history_next_leaf(ViewHandle handle)
 {
-	API api = {};
-	api.buffer.view_iterator = view_iterator_from_buffer_handle;
-	api.buffer.next          = view_iterator_next;
-	api.buffer.save          = save;
-	api.buffer.numLines      = num_lines;
-
-	api.clipboard.copy  = copy;
-	api.clipboard.cut   = cut;
-	api.clipboard.paste = paste;
-
-	api.commandLine.clear          = commandline_clear;
-	api.commandLine.close          = commandline_close;
-	api.commandLine.executeCommand = commandline_execute_command;
-	api.commandLine.feed           = commandline_feed;
-	api.commandLine.open           = commandline_open;
-
-	api.cursor.append_codepoint  = append_codepoint;
-	api.cursor.delete_selection  = delete_selection;
-	api.cursor.add               = cursor_add;
-	api.cursor.remove            = cursor_remove;
-	api.cursor.move	             = cursor_move;
-	api.cursor.moveToLocation    = cursor_move_to_location;
-	api.cursor.number_of_cursors = num_cursors;
-	api.cursor.remove_codepoint  = cursor_remove_codepoint;
-	api.cursor.selection_length  = selection_length;
-	api.cursor.get_byte = cursor_get_byte;
-	api.cursor.get_codepoint = cursor_get_codepoint;
-
-	api.callbacks.bindCommand = bind_command;
-	api.callbacks.bindKey = bind_key;
-	api.callbacks.bindKey_mods = bind_key_mods;
-	api.callbacks.registerCallBack = register_callback;
-
-	api.handles.getActiveViewHandle = view_handle_active;	 // does not include the commandline, may return null if no buffer is open
-	api.handles.getFocusedViewHandle = view_handle_focused;    // includes the commandline
-	api.handles.getCommandLineViewHandle = view_handle_cmdline;
-	api.handles.getViewHandleFromIndex = view_handle_from_index;
-	api.handles.getActiveBufferHandle = buffer_handle_active;	 // does not include the commandline, may return null if no buffer is open
-	api.handles.getFocusedBufferHandle = buffer_handle_focused;    // includes the commandline
-	api.handles.getCommandLineBufferHandle = buffer_handle_cmdline;
-	api.handles.getBufferHandleFromViewHandle = buffer_handle_from_view_handle;
-
-	api.Location.from_iterator = location_from_iterator;
-	api.Location.from_cursor = location_from_cursor;
-
-
-	api.memory.allocateMemory = memory_alloc;
-	api.memory.deallocateMemory = memory_free;
-	api.memory.getFunctionInfo = function_info_ptr;
-
-	api.misc.byteIndexFromLine = byte_index_from_line;
-	api.misc.lineFromByteIndex = line_from_byte_index;
-	api.misc.openRedirectedCommandPrompt = open_redirected_terminal; //@fixme
-
-	api.misc.addMenuItem = menu_add;
-	api.misc.sortMenu= menu_sort;
-	api.misc.move_active_menu = menu_move_active;
-	api.misc.disable_active_menu= menu_disable_active;
-	api.misc.clearMenu= menu_clear;
-	api.misc.get_active_menu_item = menu_get_active;
-	api.misc.undo = undo;
-	api.misc.redo = redo;
-
-	api.text_iterator.make = text_iterator_start;
-	api.text_iterator.make_from_cursor = text_iterator_from_cursor;
-	api.text_iterator.make_from_location = text_iterator_from_location;
-	api.text_iterator.move = text_iterator_move;
-	api.text_iterator.get_byte= text_iterator_get_byte;
-	api.text_iterator.get_codepoint= text_iterator_get_codepoint;
-
-	api.markup.background_color = markup_background_color;
-	api.markup.font = markup_font;
-	api.markup.get_initial_rendering_state = markup_get_initial_rendering_state;
-	api.markup.set_initial_rendering_state = markup_set_initial_rendering_state;
-	api.markup.highlight_color= markup_highlight_color;
-	api.markup.remove= markup_remove;
-	api.markup.scale= markup_scale;
-	api.markup.text_color= markup_text_color;
-
-	api.view.clone_view = view_clone;
-	api.view.close = view_close;
-	api.view.createFromFile = open_view;
-	api.view.get_type= view_get_type;
-	api.view.set_type = view_set_type;
-	api.view.setFocused = view_set_focused;
-	api.view.createFromBufferHandle= view_from_buffer_handle;
-
-	return api;
+	TextBuffer *tb = (TextBuffer *)handle;
+	next_leaf(tb->backingBuffer);
 }
 
-#endif
+external void history_insert_waypoint(ViewHandle handle)
+{
+	TextBuffer *tb = (TextBuffer *)handle;
+	_log_lazy_moves(&tb->backingBuffer->history);
+	Add(&tb->backingBuffer->history.waypoints, tb->backingBuffer->history.state.location.prev_instruction_index);
+}
 
 
 

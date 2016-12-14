@@ -30,7 +30,7 @@ int indexFromId(MultiGapBuffer *buffer, int id)
 }
 
 MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id)
-{
+{  
 	int index = indexFromId(buffer, id);
 	MGB_Iterator it;
 	it.sub_index = 0;
@@ -39,15 +39,11 @@ MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id)
 	return it;
 }
 
-
-
 void moveBlock(MultiGapBuffer *buffer, BufferBlock *block, int delta_pos)
 {
 	memmove(&buffer->start[block->start+delta_pos], &buffer->start[block->start], block->length * sizeof(char));
 	block->start += delta_pos;
 }
-
-
 
 int get(MultiGapBuffer *buffer, char *character)
 {
@@ -358,6 +354,32 @@ void maybeGrow(MultiGapBuffer *buffer)
 	}
 }
 
+void order_mgb(MultiGapBuffer *buffer)
+{
+	int N = buffer->cursor_ids.length-1;
+	//bubble sort should be fast enough here, we'll likely do 0 swaps. but you know.
+	// PERFORMANCE..
+	for (int n = 0; n < N; n++)
+	{
+		bool swap = false;
+		for (int i = 0; (i + n) < N; i++)
+		{
+			Gap gap = getGap(buffer, i);
+			if (!gap.next->length)
+			{
+				if (buffer->cursor_ids.start[i].id > buffer->cursor_ids.start[i + 1].id)
+				{
+					DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[i], buffer->cursor_ids.start[i + 1]);
+					swap = true;
+				}
+			}
+		}
+		if (!swap)break;
+	}
+}
+
+
+
 int AddCaret_(MultiGapBuffer *buffer, int pos)
 { 
 	// do no rebalancing, that's done on first insirt.
@@ -379,6 +401,7 @@ void AddCaretWithId(MultiGapBuffer *buffer, int textBuffer_index, int pos, int I
 		assert(buffer->cursor_ids.start[i].id != Id);
 	}
 	Insert(&buffer->cursor_ids, { textBuffer_index, Id}, AddCaret_(buffer, pos) - 1);
+	order_mgb(buffer);
 }
 
 int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
@@ -393,6 +416,7 @@ int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
 		index = AddCaret_(buffer, pos);
 		Insert(&buffer->cursor_ids, { textBuffer_index, buffer->running_cursor_id }, index - 1);
 	}
+	order_mgb(buffer);
 	return buffer->running_cursor_id++;
 }
 
@@ -438,34 +462,34 @@ void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 }
 
 
+
 bool removeCharacter(MultiGapBuffer *buffer, int caretId)
 {
-	for (int i=0;i<100;i++)
+	for (;;)
 	{
 		int caretIndex = indexFromId(buffer, caretId);
 		BufferBlock *prev = &buffer->blocks.start[caretIndex];
 		if (prev->length > 0)
 		{
 			--prev->length;
+			order_mgb(buffer);
 			return true;
 		}
 		else
 		{
 			if (caretIndex == 0)
 			{
+				order_mgb(buffer);
 				return false;
 			}
 			DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[caretIndex], buffer->cursor_ids.start[caretIndex - 1]);
 		}
 	}
-
-	assert("removeCharacter, 100 carets on top of each other or bug, probably bug yoo");
-	return false;
 }
 
 bool del(MultiGapBuffer *buffer, int caretId)
 {
-	for (int i = 0; i<100; i++)
+	for (;;)
 	{
 		int caretIndex = indexFromId(buffer, caretId);
 		BufferBlock *next = &buffer->blocks.start[caretIndex+1];
@@ -473,20 +497,19 @@ bool del(MultiGapBuffer *buffer, int caretId)
 		{
 			--next->length;
 			++next->start;
+			order_mgb(buffer);
 			return true;
 		}
 		else
 		{
 			if (caretIndex >= buffer->blocks.length-2)
 			{
+				order_mgb(buffer);
 				return false;
 			}
 			DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[caretIndex], buffer->cursor_ids.start[caretIndex + 1]);
 		}
 	}
-
-	assert("del, 100 carets all in different buffers or bug, probably bug yoo");
-	return false;
 }
 
 int posFromId(MultiGapBuffer *buffer, int caretId)
@@ -628,6 +651,7 @@ bool mgb_moveLeft(MultiGapBuffer *buffer, int caretId)
 	*start(buffer, *n) = *end(buffer, *p);
 	--p->length;
 	CheckOverlapp(buffer);
+	order_mgb(buffer);
 	return true;
 }
 
@@ -652,6 +676,7 @@ bool mgb_moveRight(MultiGapBuffer *buffer, int caretId)
 	*end(buffer, *p) = *start(buffer, *n);
 	++n->start;
 	--n->length;
+	order_mgb(buffer);
 	return true;
 }
 

@@ -45,7 +45,7 @@ enum Direction
 };
 
 //#include "History.h"
-#include "History_2.h"
+#include "History.h"
 #include "MultiGapBuffer.h"
 
 struct ColorChange
@@ -226,7 +226,7 @@ struct BackingBuffer
 	CommonBuffer commonBuffer;
 	DH_Allocator allocator;
 	MultiGapBuffer *buffer;
-	History_2 history_2;
+	History history;
 	DynamicArray_int lineSumTree;
 	int lines;
 	HashTable_PVOID_HistoryChangeTracker binding_next_change;

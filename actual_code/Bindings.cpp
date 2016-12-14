@@ -1,4 +1,4 @@
-#include "api_2.h"
+#include "api.h"
 #include "ctype.h"
 #include <set>
 #include "windows.h"
@@ -92,6 +92,7 @@ void _move(Mods mods, int direction)
 		for (int cursor = 0; cursor<num_cursors(handle); cursor++)
 			cursor_move(handle, direction, cursor, mods & mod_shift, move_mode_grapheme_cluster);
 	}
+	history_insert_waypoint(handle);
 }
 
 void _moveRight(Mods mods)
@@ -718,6 +719,7 @@ external void setBindingsLocal(void *view_handle)
 		//bind_key(view_handle, VK_NEXT, precisely, mod_none, _moveDownPage);
 		bind_key(view_handle, VK_ESCAPE, precisely, mod_none, removeAllButOneCaret);
 		bind_key(view_handle, '\t', precisely, mod_control, appendVerticalTab);
+		bind_key(view_handle, 'L', precisely, mod_control, []() {history_next_leaf(view_handle_active()); });
 	}
 
 	else if (view_get_type(view_handle) == (int)buffer_mode_commandline)

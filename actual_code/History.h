@@ -1,90 +1,117 @@
-#ifndef HISTORY_H
-#define HISTORY_H
+#ifndef History_H
+#define History_H
+#include "header.h"
 
+Data *global_data;
 
-#define DHEN_NAME Action
-#define DHEN_PREFIX action
-#define DHEN_VALUES X(move) X(add) X(remove) X(delete) X(undelete) X(addCaret) X(removeCaret)
-#include "enums.h"
-#undef DHEN_NAME
-#undef DHEN_PREFIX
-#undef DHEN_VALUES
-
-
-
-
-struct HistoryEntry
+enum HistoryOpCode : uint8_t
 {
-	Action action;
-	int caretIdIndex;
-	bool selection; 
-	union {
-		struct 
-		{
-			int pos_caret;
-			int pos_selection;
-		};
-		int direction;
-		char16_t character;
-	};
-	Location location;
+	op_add,
+	op_remove,
+	op_move,
+	op_add_cursor,
+	op_remove_cursor,
+	op_set_cursor,
+	op_set_view,
 };
 
-DEFINE_DynamicArray(HistoryEntry)
-
-enum BranchDirection
+struct Instruction
 {
-	branch_start,
-	branch_target,
-};
-
-struct HistoryBranch
-{
-	BranchDirection direction; //a bit redundant since we can only come from smaller indices but whatever
-	int index;
-	intrusive_sparse_array_body;
-};
-
-enum HistoryMarkerType
-{
-	history_mark_weak_end, //ends undo/redo if on toplevel
-	history_mark_end, //ends an event
-	history_mark_start, //starts an event
-};
-
-struct HistoryEventMarker
-{
-	HistoryMarkerType type;
-	intrusive_sparse_array_body;
+	HistoryOpCode op_code : 3;
+	uint8_t cursor_reg_index : 4;
+	bool direction : 1;
 };
 
 
-DEFINE_Complete_SparseArray(HistoryBranch);
-DEFINE_Complete_SparseArray(HistoryEventMarker);
+struct HistoryLocation
+{
+	int prev_data_index;
+	int prev_instruction_index;
+	bool (operator ==) (HistoryLocation &other)
+	{
+		return other.prev_data_index == prev_data_index &&
+			other.prev_instruction_index== prev_instruction_index;
+	}
+	bool(operator !=) (HistoryLocation &other)
+	{
+		return !(other == *this);
+	}
+};
 
-DEFINE_DynamicArray(BufferChange);
+struct HCursorInfo
+{
+	int cursor_id;
+	int view_id;
+};
+
+struct HistoryState
+{
+	HistoryLocation location;
+	HCursorInfo cursor_reg[8];
+	int last_cursor_reg;
+};
+
+struct Branch
+{
+	HistoryLocation from;
+	HistoryLocation to;
+
+	bool(operator ==) (Branch &other)
+	{
+		return other.from == from && other.to == to;
+	}
+	bool last_used;
+};
+
+DEFINE_DynamicArray(Instruction);
+DEFINE_DynamicArray(Branch);
+DEFINE_DynamicArray(uint8_t);
+
+struct WaitingMove
+{
+	int cursor_id;
+	int view_id;
+	int direction;
+};
+DEFINE_DynamicArray(WaitingMove);
+
+
 
 struct History
 {
-	DynamicArray_HistoryEntry entries;    //history
-	DynamicArray_BufferChange change_log; //highlevel changes of the buffer, what we can listen to.
-	int current_index;
-	ORD_DynamicArray_HistoryBranch branches; // as a sparse array
-	ORD_DynamicArray_HistoryEventMarker events; // as a sparse array
+	DynamicArray_int waypoints;
+	DynamicArray_Branch branches;
+	DynamicArray_Instruction instructions;
+	DynamicArray_uint8_t data;
+	HistoryState state;
+	int next_branch;
+	DynamicArray_WaitingMove waiting_moves;
 };
 
+History alloc_History(DH_Allocator allocator)
+{
+	History ret = {};
+	ret.branches = DHDS_constructDA(Branch,50,allocator);
+	ret.instructions = DHDS_constructDA(Instruction, 50, allocator);
+	ret.data = DHDS_constructDA(uint8_t, 50, allocator);
+	ret.waiting_moves = DHDS_constructDA(WaitingMove, 20, allocator);
+	ret.waypoints = DHDS_constructDA(int, 50, allocator);
+	ret.state.location = { -1,-1 };
+	return ret;
+}
 
-internal int  intFromDir(Direction dir);
-internal bool treatEQ(Action a, Action b);
-internal bool undo(TextBuffer *textBuffer);
-internal bool redo(TextBuffer *textBuffer);
-internal void undoMany(TextBuffer *textBuffer);
-internal void logRemoved(TextBuffer *textBuffer, char character, int caretIdIndex,Location location);
-internal void logDeleted(TextBuffer *textBuffer, char character, int caretIdIndex, Location location);
-internal void logAdded(TextBuffer *textBuffer, char character, int caretIdIndex, Location location);
-internal void logMoved(TextBuffer *textBuffer, Direction direction, bool selection, int caretIdIndex, Location location);
-internal void logAddCaret(TextBuffer *textBuffer, int pos_caret, int pos_selection, int caretIdIndex, Location location);
-internal void logRemoveCaret(TextBuffer *textBuffer, int pos_caret, int pos_selection, int caretIdIndex, Location location);
-internal void insert_event_marker(History *history, HistoryMarkerType type);
+enum HistoryDirection
+{
+	history_dir_left,
+	history_dir_right,
+};
 
+void log_move(History *history, int8_t direction, int cursor_id, int view_id);
+void log_add(History *history, int8_t direction, char byte, int cursor_id, int view_id);
+void log_remove(History *history, int direction, char byte, int cursor_id, int view_id);
+void log_add_cursor(History *history, int pos, bool is_selection, int cursor_id, int view_id);
+void log_remove_cursor(History *history, int pos, bool is_selection, int cursor_id, int view_id);
+struct BackingBuffer;
+void undo(BackingBuffer *backingBuffer);
+void redo(BackingBuffer *backingBuffer);
 #endif
