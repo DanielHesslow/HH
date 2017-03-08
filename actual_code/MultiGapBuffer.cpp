@@ -294,7 +294,6 @@ void rebalance(MultiGapBuffer *buffer, int index, int excess)
 	//does this even work if the target isn't an integer?
 	if (index >= buffer->blocks.length - 1)
 	{
-		assert(!excess);
 		return;
 	}
 
@@ -354,6 +353,12 @@ void maybeGrow(MultiGapBuffer *buffer)
 	}
 }
 
+
+//this is neccessary beacuse zero length cursors need to be in a deterministic order for undo's, redos to work 
+//for example if two cursors is at the same place and you add a bunch of characters 'asdasda'
+//the other may be at the start or at the end, |'asdasda', 'asdasda'|, both valid, for the other cursor.
+//therefor we always keep them sorted on id when they're in the same place, 
+//another (probably more complicated) alternative is to log in history zero lenght moves accross other cursors. but that seams silly. 
 void order_mgb(MultiGapBuffer *buffer)
 {
 	int N = buffer->cursor_ids.length-1;

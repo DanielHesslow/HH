@@ -83,9 +83,9 @@ static DH_Allocator font_allocator = arena_allocator(allocateArena(KB(64), platf
 #define STBTT_malloc(x,u) alloc_(x,u)
 #define STBTT_free(x,u) free_(x)
 #define STBTT_strlen(x) strlen(x);
+#define STBTT_assert(x) assert(x);
 
 #include "..\\libs\\stb_truetype.h" 
-
 
 
 
@@ -688,7 +688,6 @@ internal void redoLineSumTree(BackingBuffer *backingBuffer)
 	} while (MoveIterator(backingBuffer->buffer,&it,read));
 	backingBuffer->lines = line+1;
 	binsumtree_set(sum_tree, line++, counter);
-	
 }
 
 internal void validate_sum_tree(BackingBuffer *backingBuffer)
@@ -699,6 +698,8 @@ internal void validate_sum_tree(BackingBuffer *backingBuffer)
 	int line = 0;
 	int read;
 	do {
+
+		//hmm we have some unicode problem here. append is doing the incremental update wrong?
 		char32_t codepoint;
 		read = getCodepoint(backingBuffer->buffer, it, &codepoint);
 		counter += read;
@@ -893,7 +894,6 @@ void change_added(BackingBuffer *backingBuffer, Location loc, char byte)
 		{
 			binsumtree_set_relative(sum_tree, loc.line, +1);
 		}
-		validate_sum_tree(backingBuffer);
 	}
 
 	for (int i = 0; i < backingBuffer->textBuffers.length; i++)
@@ -919,7 +919,6 @@ void change_removed(BackingBuffer *backingBuffer, Location loc, char byte)
 		{
 			binsumtree_set_relative(sum_tree, loc.line, -1);
 		}
-		validate_sum_tree(backingBuffer);
 	}
 }
 
@@ -1375,14 +1374,10 @@ internal int getGlyph(Typeface::Font *font, char32_t codepoint)
 {
 	int *p_glyph_index;
 	int glyph_index;
-	if (lookup(&font->cachedGlyphs, codepoint, &p_glyph_index))
-	{
-		glyph_index = *p_glyph_index;
-	}
-	else
+	if (!font->cachedGlyphs.lookup(codepoint, &glyph_index))
 	{
 		glyph_index = stbtt_FindGlyphIndex(font->font_info, codepoint);
-		insert(&font->cachedGlyphs, codepoint, glyph_index);
+		font->cachedGlyphs.insert(codepoint, glyph_index);
 	}
 	return glyph_index;
 }
@@ -1575,8 +1570,9 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 
 	buffer->buffer = stringBuffer;
 	buffer->commonBuffer.allocator = allocator_user;
-	buffer->commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
-	buffer->binding_next_change = DHDS_constructHT(PVOID, HistoryChangeTracker, 20, allocator);
+	//@LEAK, use allocator.....
+	buffer->commonBuffer.bindingMemory = HashTable_BindingIdentifier_PVOID::make(&buffer->allocator,32); //@CLEANUP think about this.. not 100% ok do we know that buffer won't move??
+	buffer->binding_next_change = HashTable_PVOID_HistoryChangeTracker::make(&buffer->allocator, 32);// DHDS_constructHT(PVOID, HistoryChangeTracker, 20, allocator);
 	initLineSumTree(buffer, allocator);
 	buffer->textBuffers = constructDynamicArray_PTextBuffer(4,"textBuffers",allocator);
 	return buffer;
@@ -1584,8 +1580,18 @@ internal BackingBuffer *allocBackingBuffer(int initialMultiGapBufferSize, int in
 
 typedef BackingBuffer *PBackingBuffer;
 
-DEFINE_HashTable(DHSTR_String, PBackingBuffer, hash_string, [](DHSTR_String a, DHSTR_String b) {return DHSTR_eq(a, b, string_eq_length_matter); });
-global_variable HashTable_DHSTR_String_PBackingBuffer open_files = DHDS_constructHT(DHSTR_String, PBackingBuffer, 128, default_allocator);
+//DEFINE_HashTable(DHSTR_String, PBackingBuffer, hash_string, [](DHSTR_String a, DHSTR_String b) {return DHSTR_eq(a, b, string_eq_length_matter); });
+//global_variable HashTable_DHSTR_String_PBackingBuffer open_files = DHDS_constructHT(DHSTR_String, PBackingBuffer, 128, default_allocator);
+
+
+#define HT_KEY DHSTR_String
+#define HT_VALUE BackingBuffer *
+#define HT_HASH(x) hash_string(x)
+#define HT_EQUAL(a,b) DHSTR_eq(a,b,string_eq_length_matter);
+#define HT_NAME HashTable_STR_BB
+#include "L:\HashTable.h"
+
+global_variable HashTable_STR_BB open_files = HashTable_STR_BB::make(&default_allocator);
 
 
 void attatch_BackingBuffer(TextBuffer *textBuffer, BackingBuffer *backingBuffer)
@@ -1611,8 +1617,8 @@ void detach_BackingBuffer(TextBuffer *textBuffer)
 	
 	if (!backingBuffer->textBuffers.length)
 	{
-		bool hasRemoved;
-		remove(&open_files, backingBuffer->path, &hasRemoved);
+		bool hasRemoved = open_files.remove(backingBuffer->path);
+		//remove(&open_files, backingBuffer->path, &hasRemoved);
 		arena_deallocate_all(backingBuffer->commonBuffer.allocator); 
 		arena_deallocate_all(backingBuffer->allocator); // including the actual backingBuffer. Nifty.
 	}
@@ -1623,13 +1629,11 @@ internal bool get_backingBuffer(DHSTR_String file_name, BackingBuffer **_out_buf
 {
 	*_out_buffer = (BackingBuffer *)0;
 
-	BackingBuffer **backingBuffer_ptr;
 	BackingBuffer *backingBuffer;
 
-	if (lookup(&open_files, file_name, &backingBuffer_ptr))
+	if (open_files.lookup(file_name, &backingBuffer))
 	{
 		dprs("piggybacking");
-		backingBuffer = *backingBuffer_ptr;
 	}
 	else
 	{
@@ -1639,7 +1643,7 @@ internal bool get_backingBuffer(DHSTR_String file_name, BackingBuffer **_out_buf
 			return false;
 		}
 		dprs("createing backingBuffer");
-		insert(&open_files, file_name, backingBuffer);
+		open_files.insert(file_name,backingBuffer); //insert(&open_files, file_name, backingBuffer);
 	}
 	*_out_buffer = backingBuffer;
 	return true;
@@ -1650,8 +1654,10 @@ Typeface::Font LoadFont(DHSTR_String path)
 
 
 	Typeface::Font ret = {};
-	ret.cachedBitmaps = DHDS_constructHT(ulli, CharBitmap, 256, font_allocator);
-	ret.cachedGlyphs = DHDS_constructHT(char32_t, int, 256, font_allocator);
+	//@LEAK, right? 
+	ret.cachedBitmaps = HashTable_ulli_CharBitmap::make(&font_allocator,16);
+	ret.cachedGlyphs = HashTable_char32_t_int::make(&font_allocator,16);
+
 	ret.font_info = (stbtt_fontinfo *)Allocate(font_allocator, sizeof(stbtt_fontinfo), "fontinfo_info");
 	ret.font_info->userdata = "stbtt internal allocation";
 	setUpTT(ret.font_info,DHSTR_UTF8_FROM_STRING(path,alloca));
@@ -1814,7 +1820,13 @@ internal TextBuffer *allocTextBuffer(int initialMultiGapBufferSize, int initialL
 	textBuffer->cursorInfo = DHDS_constructDA(CursorInfo,20, allocator);
 	textBuffer->contextCharWidthHook = DHDS_constructDA(ContextCharWidthHook, 20, allocator);
 	textBuffer->renderingModifiers= DHDS_constructDA(RenderingModifier,20, allocator);
-	textBuffer->commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
+	
+	//@LEAK... use allocator. 
+	//textBuffer->commonBuffer.bindingMemory = DHDS_constructHT(BindingIdentifier, PVOID, 20, allocator);
+
+	DH_Allocator *ptr_to_allocator = (DH_Allocator *)Allocate(allocator_user, sizeof(DH_Allocator), 0); //@Hacky as fuck...
+	*ptr_to_allocator = allocator_user;
+	textBuffer->commonBuffer.bindingMemory = HashTable_BindingIdentifier_PVOID::make(ptr_to_allocator,32);
 	textBuffer->commonBuffer.allocator = allocator_user;
 	textBuffer->rendering_changes = DHDS_ORD_constructDA(CharRenderingChange, 20, allocator);
 	return textBuffer;
@@ -1884,8 +1896,8 @@ internal void freeTextBuffer(TextBuffer *buffer)
 {
 	if(buffer->backingBuffer)
 		detach_BackingBuffer(buffer);
-	arena_deallocate_all(buffer->allocator);
 	arena_deallocate_all(buffer->commonBuffer.allocator);
+	arena_deallocate_all(buffer->allocator);
 }
 
 
@@ -2360,7 +2372,7 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 	b.colorStride = color_stride;
 	b.memory = new_mem;
 
-	insert(&font->cachedBitmaps, charBitmapIdentifier(scale, codepoint), b);
+	font->cachedBitmaps.insert(charBitmapIdentifier(scale, codepoint), b);
 	return b;
 }
 
@@ -2368,10 +2380,10 @@ internal CharBitmap getCharBitmap(int codepoint, float scale, Typeface::Font *fo
 {
 	bool found = false;
 	long long unsigned int ident = charBitmapIdentifier(scale,codepoint);
-	CharBitmap *lookedup;
-	if(lookup(&font->cachedBitmaps, ident, &lookedup)) 
+	CharBitmap lookedup;
+	if(font->cachedBitmaps.lookup(ident, &lookedup)) 
 	{
-		return *lookedup;
+		return lookedup;
 	}
 	
 	// if we try to load a ton of unicode stuff it's way better to not render every char than to choke.
@@ -3137,6 +3149,8 @@ internal bool stripInitialWhite(MultiGapBuffer *buffer, MGB_Iterator *it, int *c
 struct API;
 
 void(*setBindingsLocal)(void *view_handle);
+void(*execute_bindings)(char VK_CODE, Mods mods, char *utf8, int utf8_len);
+
 #include "api.cpp"
 
 //TODO Merge reload textbuffer and init?
@@ -3328,7 +3342,6 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 		renderScroll(buffer,text);
 
 		renderInfoBar(buffer, allocationInfo, infoScale,0, infoSpace-2,isActive);
-	
 	}
 	else if (buffer->bufferType == ASTBuffer)
 	{
@@ -3481,7 +3494,7 @@ internal void renderBackground(Bitmap bitmap)
 }
 
 //support mutliple buffers to the same file.
-internal void updateInput(Data *data, Input *input,Bitmap bitmap, uint64_t lastAction)
+internal void updateInput(Data *data, Input *input, Bitmap bitmap, uint64_t lastAction)
 {
 	TextBuffer *textBuffer;
 	bool hasActiveBuffer = getActiveBuffer(data, &textBuffer);
@@ -3494,18 +3507,19 @@ internal void updateInput(Data *data, Input *input,Bitmap bitmap, uint64_t lastA
 		textBuffer = data->commandLine;
 		data->isCommandlineActive = true;
 	}
-
-	if (input->inputType == input_character)
+	if (data->isCommandlineActive && input->inputType == input_keyboard && input->utf8)
 	{
-		if (data->eatNext) 
-		{
-			data->eatNext = false;
-			return;
-		}
+		keyDown_CommandLine(data);
+	}
+
+#if 0
+	if (input->inputType == input_keyboard && input->utf8)
+	{
 		if(data->isCommandlineActive)
 		{
-			if (!iswcntrl(input->character))
-				appendCharacter(textBuffer,input->character);
+			//if (!iswcntrl(input->character))
+			for (int i = 0; i < input->utf8_len;i++)
+				appendCharacter(textBuffer,input->utf8[i]);
 			keyDown_CommandLine(data);
 		}
 		else
@@ -3517,7 +3531,7 @@ internal void updateInput(Data *data, Input *input,Bitmap bitmap, uint64_t lastA
 			// it works on a swedish one that's for sure...
 			if (input->control && !input->alt)return;
 #if 1
-			if (input->character == '\t')
+			if (input->VK_Code == VK_TAB)
 			{
 				if (!input->shift)
 				{
@@ -3530,15 +3544,13 @@ internal void updateInput(Data *data, Input *input,Bitmap bitmap, uint64_t lastA
 			}
 			else 
 #endif		
-			if (isLineBreak(input->character)) //huston we have a problem. (crashes when we've got no buffer open)
-			{// do we only append \r (^m) here?
-
-				//int indent = getIndentLine(*textBuffer,currentCaretIndex);
+			if (input->VK_Code == VK_RETURN) 
+			{
 				int indent = 0;
+				//int indent = getIndentLine(*textBuffer,currentCaretIndex);
 				//fucking_fix_me_please
 				//appendCharacter(textBuffer, '\r\n');
 				appendCharacter(textBuffer, '\n');
-
 				for (int i = 0; i< indent; i++)
 				{
 					appendCharacter(textBuffer, '\t');
@@ -3546,21 +3558,12 @@ internal void updateInput(Data *data, Input *input,Bitmap bitmap, uint64_t lastA
 			}
 			else
 			{
-				if (!iswcntrl(input->character))
-				{
-					char buffer[4];
-					int32_t errors;
-					int read = utf16toutf8(&input->VK_Code, sizeof(char16_t), buffer, 4 * sizeof(char), &errors);
-					if (!errors)
-						for (int i = 0; i < read; i++) appendCharacter(textBuffer, buffer[i]);
-					else
-						assert(false && "could not convert keyboard input to utf8");
-				}
+				for (int i = 0; i < input->utf8_len; i++) appendCharacter(textBuffer, input->utf8[i]);
 			}
 
 		}
 	}
-	else if (input->inputType == input_key)
+	else if (input->inputType == input_keyboard && !input->utf8)
 	{
 		Mods currentMods = mod_none;
 		if (input->shift)  currentMods = currentMods | mod_shift;
@@ -3596,6 +3599,17 @@ internal void updateInput(Data *data, Input *input,Bitmap bitmap, uint64_t lastA
 #endif 
 		//fucking_fix_me_please @fixme @todo
 	}
+#endif
+	Mods currentMods = mod_none;
+	if (input->shift_left)  currentMods = currentMods | mod_shift_left;
+	if (input->shift_right)  currentMods = currentMods | mod_shift_right;
+
+	if (input->control_left)  currentMods = currentMods | mod_control_left;
+	if (input->control_right)  currentMods = currentMods | mod_control_right;
+
+	if (input->alt_left)  currentMods = currentMods | mod_alt_left;
+	if (input->alt_right)  currentMods = currentMods | mod_alt_right;
+	execute_bindings(input->VK_Code, currentMods, input->utf8, input->utf8_len);
 
 }
 global_variable float blinkTimePerS = 0.5;
@@ -3637,14 +3651,19 @@ void render_and_advance(Bitmap bitmap, char **ptr)
 
 void reload_textBuffer(TextBuffer *textBuffer)
 {
+	//@CLEANUP are we correct here?
 	arena_deallocate_all(textBuffer->commonBuffer.allocator);
 	arena_deallocate_all(textBuffer->backingBuffer->commonBuffer.allocator);
 	textBuffer->backingBuffer->commonBuffer.allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "BackingBuffer user arena"));
 	textBuffer->commonBuffer.allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "TextBuffer user arena"));
 	textBuffer->renderingModifiers.length = 0;
 	textBuffer->KeyBindings.length = 0;
-	clear(&textBuffer->commonBuffer.bindingMemory);
-	clear(&textBuffer->backingBuffer->commonBuffer.bindingMemory);
+
+	DH_Allocator *alloc_ptr = (DH_Allocator *)Allocate(textBuffer->commonBuffer.allocator, sizeof(DH_Allocator), 0);
+	*alloc_ptr = textBuffer->commonBuffer.allocator;
+	// @HACK, @CLEANUP, hacky as fuck... allocators should always use ptrs... this is bad..
+	textBuffer->commonBuffer.bindingMemory = HashTable_BindingIdentifier_PVOID::make(alloc_ptr);
+	textBuffer->backingBuffer->commonBuffer.bindingMemory = HashTable_BindingIdentifier_PVOID::make(&textBuffer->commonBuffer.allocator);
 	_setLocalBindings(textBuffer);
 	textBuffer->rendering_changes.length = 0;
 }
@@ -3675,11 +3694,15 @@ void reload_dll()
 			if (DLL)FreeLibrary(DLL);
 
 			commands.length = 0;
+			//@Robustness inf-loop (ex. bindings.dll doesn't exsist), but default into exe.
 			while (!CopyFile("Bindings.dll", "Bindings_tmp.dll", false));
 			int err = GetLastError();
 
 			DLL = LoadLibrary("Bindings_tmp.dll");
 			setBindingsLocal = (void(*)(void *))GetProcAddress(DLL, "setBindingsLocal");
+			
+
+			execute_bindings = (void (*)(char,Mods,char *,int))GetProcAddress(DLL, "bindings");
 
 			ColorScheme(*get_colorScheme)() = (ColorScheme(*)())GetProcAddress(DLL, "get_colorScheme");
 			active_colorScheme = get_colorScheme();

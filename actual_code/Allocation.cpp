@@ -24,8 +24,6 @@ char *blockEnd(Allocation block)
 	return block.start + block.length;
 }
 
-
-
 void *alloc_(size_t memorySize, void *allocationInfo, void *owner) 
 {
 	memorySize *= 2;

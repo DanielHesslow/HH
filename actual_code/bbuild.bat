@@ -34,8 +34,10 @@ set file_name=bindings
 
 del bindings*.pdb
 
+:: better not fucking be any spaces at the end of the following lines.
 set t=%time::=%
 set t=%t:.=%
+set t=%t: =%
 
 set flags=..\HH\actual_code\bindings.cpp /Zi /EHsc  /Fe%file_name%  /LD /link /INCREMENTAL:NO /PDB:bindings%t%.pdb  
 

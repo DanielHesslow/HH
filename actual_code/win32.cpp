@@ -19,6 +19,7 @@
 
 global_variable bool running;
 global_variable win32OffScreenBuffer bitmap;
+global_variable Data data = {};
 
 //deeeeeebuuuuuggg
 
@@ -87,9 +88,6 @@ internal void win32UpdateWindow(HDC deviceContext, int windowWidth, int windowHe
 		DIB_RGB_COLORS);
 }
 
-
-
-
 global_variable bool redraw = true;
 global_variable bool redrawAll = true;
 
@@ -103,49 +101,142 @@ LRESULT CALLBACK win32MainWindowCallback(HWND window,
 	LRESULT result = 0;
 	switch (message)
 	{	
-		case WM_KEYDOWN:
-		case WM_CHAR:
-			
-			//we've don't disptach them here. I hope windows won't go over our head... You never know..
-			//oh windows sure do sometimes lol...
-			//I'll have to handle it..
-			
-			//ASSERT(false&&"windows is messing with us");	
-		break;
-	
 		case WM_SIZE:
+			win32ResizeDIBSection(&bitmap, LOWORD(lParam), HIWORD(lParam));
+		break;
+		case WM_INPUT:
 		{
-			win32WindowDimensions dims = getWindowDimensions(window);
-			win32ResizeDIBSection(&bitmap, dims.width, dims.height);
-			
-		} break; 
-		case WM_DESTROY:
-		{
-			running =false;
-		} break;
-		case WM_CLOSE:
-		{
+			//this documentation is retarded, msdn implies that the size can be any size whatsoever, 
+			//however it will be *one* of the *possible* unions, so unless we like to dynamically allocate to save like two bytes.
+			//we can just point to our own rawinput structure. Come on MSDN. I dislike allocating shit that I don't have to.
+
+			RAWINPUT raw;
+			UINT dw_size = sizeof(RAWINPUT);
+			int ret = GetRawInputData((HRAWINPUT)lParam, RID_INPUT, &raw, &dw_size,sizeof(RAWINPUTHEADER));
+			assert(ret > 0);
+			RAWKEYBOARD kb = raw.data.keyboard;
+			UINT scanCode = kb.MakeCode;
+			bool e0 = false;
+			static unsigned char keyState[256] = {};
+			{
+				
+				e0 = kb.Flags & RI_KEY_E0;
+				bool e1 = kb.Flags & RI_KEY_E1;
+				if (e1)
+				{
+					scanCode = MapVirtualKey(kb.VKey, MAPVK_VK_TO_VSC);
+				}
+					
+				// these are unasigned but not reserved as of now.
+				// this is bad but, you know, we'll fix it if it ever breaks.
+				#define VK_LRETURN         0x9E
+				#define VK_RRETURN         0x9F
+
+				#define UPDATE_KEY_STATE(key) do{keyState[key] = (kb.Flags & 1) ? 0 : 0xff;}while(0)
+				if (kb.VKey == VK_CONTROL)
+				{
+					if (e0)	UPDATE_KEY_STATE(VK_RCONTROL);
+					else	UPDATE_KEY_STATE(VK_LCONTROL);
+					keyState[VK_CONTROL] = keyState[VK_RCONTROL] | keyState[VK_LCONTROL];
+				}
+				else if (kb.VKey == VK_SHIFT)
+				{
+					// because why should any api be consistant lol
+					// (because we get different scancodes for l/r-shift but not for l/r ctrl etc... but still)
+					UPDATE_KEY_STATE(MapVirtualKey(kb.MakeCode, MAPVK_VSC_TO_VK_EX));
+					keyState[VK_SHIFT] = keyState[VK_LSHIFT] | keyState[VK_RSHIFT];
+				}
+				else if (kb.VKey == VK_MENU)
+				{
+					if (e0)	UPDATE_KEY_STATE(VK_RMENU);
+					else	UPDATE_KEY_STATE(VK_LMENU);
+					keyState[VK_MENU] = keyState[VK_RMENU] | keyState[VK_LMENU];
+				}
+				else if (kb.VKey == VK_RETURN)
+				{
+					// this is currently not sent through to the application 
+					// but I thought while I remembered what the hell this crap is about I might as well write it.
+					if (e0) UPDATE_KEY_STATE(VK_RRETURN);
+					else	UPDATE_KEY_STATE(VK_LRETURN);
+					keyState[VK_RETURN] = keyState[VK_RRETURN] | keyState[VK_LRETURN];
+				}
+				else
+				{
+					UPDATE_KEY_STATE(kb.VKey);
+				}
+				#undef UPDATE_KEY_STATE
+			}
+
+			bool window_is_ontop = !wParam;
+			if (raw.header.dwType == RIM_TYPEKEYBOARD && window_is_ontop)
+			{
+				assert(!(kb.VKey >> 8));
+				
+				if(!(kb.Flags & 0x1))
+				{
+					char utf8_buffer[32];
+					char *buff=0;
+					int utf8_len = 0;
+					
+					wchar_t utf16_buffer[16];
+					unsigned char ctrl = keyState[VK_CONTROL];
+					// note this is only true on euro keyboards ie. where left alt is alt gr
+					// however this appears to work on US-keyboards as well since control is ignored in the ToUnicode function
+
+					keyState[VK_CONTROL]|= keyState[VK_RMENU];
+					int utf16_len = ToUnicode(kb.VKey, kb.MakeCode, keyState, utf16_buffer, ARRAY_LENGTH(utf16_buffer), 0);
+					keyState[VK_CONTROL] = ctrl;
+					
+
+					if (utf16_len > 0) //this is a bad check, errs on multiple bytes!
+					{
+						if (!iswcntrl(utf16_buffer[0]))
+						{
+							int32_t errors;
+							utf8_len= utf16toutf8((utf16_t *)utf16_buffer, utf16_len*sizeof(char16_t), utf8_buffer, ARRAY_LENGTH(utf8_buffer), &errors);
+							if (!errors)
+							{
+								buff = utf8_buffer;
+							}
+							else
+							{
+								utf8_len = 0;
+							}
+						}
+					}
+					
+					if (kb.VKey == VK_RETURN)
+					{
+						utf8_len = 1;
+						utf8_buffer[0] = '\n';
+						buff = utf8_buffer;
+					}
+
+					Input input = {};
+					input.caps = keyState[VK_CAPITAL];
+					input.inputType = input_keyboard;
+					input.utf8 = buff;
+					input.utf8_len = utf8_len;
+					input.VK_Code = kb.VKey;
+				
+					input.shift_left    = keyState[VK_LSHIFT];
+					input.shift_right   = keyState[VK_RSHIFT];
+					input.control_right = keyState[VK_RCONTROL];
+					input.control_left  = keyState[VK_LCONTROL];
+					input.alt_right     = keyState[VK_RMENU];
+					input.alt_left      = keyState[VK_LMENU];
+
+					updateInput(&data, &input, bitmap.bitmap, 0);
+
+					result = DefWindowProc(window, message, wParam, lParam);
+				}
+			}
+			break;
+		}
+		case WM_DESTROY: 
+		{//kill application
 			running = false;
-		} break;
-		case WM_ACTIVATEAPP:
-		{
-		} break;
-		case WM_PAINT:
-		{
-#if 1
-			redraw = true;
-			redrawAll = true;
-#else
-			textBuffer.bitmap = bitmap.bitmap;
-			Update(&textBuffer, 5, 0, {}, false);
-			
-			PAINTSTRUCT paint;
-			HDC deviceContext = BeginPaint(window,&paint);
-			win32WindowDimensions windowDims = getWindowDimensions(window);
-		
-			win32UpdateWindow(deviceContext,windowDims.width,windowDims.height,bitmap);
-			EndPaint(window, &paint);
-#endif
+			break;
 		}
 		default:
 		{
@@ -153,15 +244,6 @@ LRESULT CALLBACK win32MainWindowCallback(HWND window,
 		} break;
 	}
 	return result;	
-}
-
-internal void setMods(Input *input)
-{
-	input->shift   = GetKeyState(VK_SHIFT) & 1 << 7;
-	input->control = GetKeyState(VK_CONTROL) & 1 << 7;
-	input->caps    = GetKeyState(VK_CAPITAL) & 1; //yes it should not be shifted, this is a toggle key... Also VK_CAPITAL..REALLY?
-	input->alt	   = GetKeyState(VK_MENU) & 1<<7; //ok menu... everyone's fired.
-
 }
 
 global_variable unsigned int CUSTOM_CLIPBOARD_ID = RegisterClipboardFormat("DH_TE_ClipboardFormat");
@@ -178,7 +260,7 @@ internal void win32_StoreInClipboard(InternalClipboard *clipboard)
 
 		DynamicArray_char buffer = DHDS_constructDA(char, 200,default_allocator);
 		serialize(&buffer, *clipboard);
-
+		
 		//this only workis if GMEM_FIXED is set. why? (GPTR = GMEM_FIXED | GMEM_ZEROINIT)
 		customFormatMem = GlobalAlloc(GPTR, buffer.length);
 		GlobalLock(customFormatMem);
@@ -412,9 +494,11 @@ void loadFonts()
 
 internal bool charDown(int character, Input *input)
 {
+	/*
 	setMods(input);
 	input->inputType = input_character;
 	input->character = character;
+	*/
 	return true;
 }
 
@@ -451,7 +535,7 @@ WinMain(HINSTANCE instance,
 		LPSTR args,
 		int showCode)
 {
-	test();
+
 	if (GetCaretBlinkTime() == INFINITE)			
 	{
 		blinkTimePerS = 0;
@@ -491,6 +575,15 @@ WinMain(HINSTANCE instance,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 		0, 0, instance, 0);
 #endif
+	
+	RAWINPUTDEVICE rid = {};
+	rid.usUsagePage = 0x01;
+	rid.usUsage = 0x06;
+	rid.dwFlags = RIDEV_NOLEGACY| RIDEV_INPUTSINK;   // adds HID keyboard and also ignores legacy keyboard messages
+	rid.hwndTarget = window;
+
+	assert(RegisterRawInputDevices(&rid, 1, sizeof(rid)));
+	
 
 	win32WindowDimensions dims = getWindowDimensions(window);
 	win32ResizeDIBSection(&bitmap,dims.width,dims.height);
@@ -506,7 +599,6 @@ WinMain(HINSTANCE instance,
 
 	//Add(&textBuffers, textBuffer);
 	
-	Data data = {};
 	data.textBuffers = textBuffers;
 	TextBuffer *buffer= openCommanLine();
 	data.commandLine = buffer;
@@ -517,7 +609,8 @@ WinMain(HINSTANCE instance,
 	//Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
 	//Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
 
-	data.layout = CREATE_LAYOUT(layout_type_y, 2, leaf, .5, leaf);
+	data.layout = CREATE_LAYOUT(layout_type_y, 2, leaf, .5, CREATE_LAYOUT(layout_type_x,2,leaf,.5,leaf));
+
 	uint16_t timeSinceStartUpInMs;
 		
 	//test_binsumtree_();
@@ -536,57 +629,9 @@ WinMain(HINSTANCE instance,
 			
 			while (PeekMessage(&message, 0, 0, 0, PM_REMOVE))
 			{
-				bool hasInput = false;		//if this is set outside of this loop we bug out 
-											// so there is something wrong in here!
-				TranslateMessage(&message);
-				UINT msgType = message.message;
-
-
-				char buffer[100];
-				sprintf(buffer, "Message is %X\n", msgType);
-				//OutputDebugString(buffer);
-
-				if (msgType == WM_QUIT)
-				{
-					running = false;
-				}
-				else if (msgType == WM_KEYDOWN || msgType == WM_SYSKEYDOWN)
-				{
-					//hasInput = keyDown((uint8_t)message.wParam, &input);
-					hasInput = true;
-					input.VK_Code = message.wParam;
-					input.inputType = input_key;
-					setMods(&input);
-					redraw = redraw || hasInput;
-				}
-				else if (msgType == WM_SYSCHAR)
-				{
-					// doshitall..what is this even. 
-					// stops that annoying windows sound from being played at least
-				}
-				else if (msgType== WM_CHAR)
-				{
-					hasInput = charDown(message.wParam, &input);
-					redraw = redraw || hasInput;
-				}
-				else if (msgType == WM_MOUSEWHEEL)
-				{
-					setMods(&input);
-					int zDelta = GET_WHEEL_DELTA_WPARAM(message.wParam);
-					hasInput = true;
-					input.inputType = input_mouseWheel;
-					
-					input.mouseWheel = zDelta;
-				}
-				else
-				{
-					DispatchMessage(&message);
-				}
-				if(hasInput)
-					updateInput(&data, &input,bitmap.bitmap, MicorSeconds_Since_StartUP);
+				DispatchMessage(&message);
 			}
-			
-			if (redraw||true) //since we do smoothscrolling and stuff we need to improve the simple redraw thing.
+
 			{
 				//data.updateAllBuffers |= redrawAll;
 				data.updateAllBuffers = true;
@@ -596,17 +641,15 @@ WinMain(HINSTANCE instance,
 				win32WindowDimensions windowDims = getWindowDimensions(window);
 				win32UpdateWindow(deviceContext, windowDims.width, windowDims.height, bitmap);
 				ReleaseDC(window, deviceContext);
-				redraw = false;
 			}
 
-			//no need to update more frequently than the screen fps.
 			uint64_t timeStamp;
 			uint64_t timePassed = get_MicroSeconds_Since(previousTimeStamp,&timeStamp);
 			MicorSeconds_Since_StartUP += timePassed;
 			
 			if (timePassed < targetFrameWait)
 			{
-				Sleep((targetFrameWait - timePassed)/1000); // erm system clock is 15,6ms. which is waaaay to much. all our frames may wait between 0 and 15,6 ms. Which is way to much. 
+				Sleep((targetFrameWait - timePassed)/1000); // erm system clock is granular to 15,6ms. which is waaaay to much. all our frames may wait between 0 and 15,6 ms. Which is way to much. 
 			}
 			
 			previousTimeStamp = timeStamp;

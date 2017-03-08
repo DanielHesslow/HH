@@ -1,12 +1,12 @@
 // BACKEND API LAYER
 
 #define API extern "C" __declspec(dllexport)
-#define external extern "C" __declspec(dllexport)
 
 #define HEADER_ONLY
 //#include "api.h"
 #include "api.h"
 #include "header.h"
+
 
 struct CommandInfo
 {
@@ -17,6 +17,7 @@ struct CommandInfo
 	void(*charDown)(char *str, int strlen, void **user_data);
 };
 
+external char cursor_get_byte(ViewHandle view_handle, int cursor, int dir);
 
 void *MenuAlloc(size_t bytes)
 {
@@ -406,61 +407,6 @@ external int cursor_move(ViewHandle view_handle, int direction, int cursor_index
 	return ack; //return number of places the cursors have moved together.
 }
 
-
-struct StringAckumulator
-{
-	int length;
-	
-	char *buffer;
-
-	int capacity;
-	
-	void clear()
-	{
-		length = 0;
-	}
-
-	void push(char c, int dir)
-	{
-		assert(dir == 1 || dir == -1);
-		
-		length += dir;
-		if (abs(length)> capacity)
-		{
-			//need to grow..
-			assert(false);
-			return;
-		}
-		if (dir < 0 && length > 0 || dir > 0 && length < 0)
-		{
-			assert(buffer[length > 0 ? length : (capacity + length)] == c);
-		}
-		else
-		{
-			buffer[length > 0? length : (capacity + length)] = c;
-		}
-	}
-
-	int get_ackumulated(char **string)
-	{
-		if (length >= 0)
-		{
-			*string = buffer;
-			return length;
-		}
-		else
-		{
-			*string = buffer + capacity + length;
-			return -length;
-		}
-	}
-	int get_length()
-	{
-		return abs(length);
-	}
-};
-
-
 internal void removeAllButOneCaret(TextBuffer *buffer)
 {
 	for (int i = 1; i < buffer->ownedCarets_id.length; )
@@ -496,16 +442,22 @@ external bool cursor_remove(ViewHandle view_handle, int cursor_index)
 	return true; //TODO we can totes fail 
 }
 
-external void append_codepoint(ViewHandle view_handle, int cursor_index, int direction, char32_t character)
+external void append_byte(ViewHandle view_handle, int cursor_index, int direction, char byte)
 {
 	TextBuffer *buffer = (TextBuffer *)view_handle;
 	int state = 0;
 
 	for (int i = 0; i < direction; i++)
-		unDeleteCharacter(buffer, character, cursor_index);
+		unDeleteCharacter(buffer, byte, cursor_index);
 
 	for (int i = 0; i < -direction; i++)
-		appendCharacter(buffer, character, cursor_index);
+		appendCharacter(buffer, byte, cursor_index);
+}
+
+bool utf8_initial_byte(unsigned char byte)
+{
+	int num_leading_ones = __lzcnt16(((uint16_t)~byte) & 0xff) - 8;
+	return num_leading_ones != 1;
 }
 
 external void cursor_remove_codepoint(ViewHandle view_handle, int cursor_index, int direction)
@@ -514,11 +466,26 @@ external void cursor_remove_codepoint(ViewHandle view_handle, int cursor_index, 
 	int state = 0;
 
 	for (int i = 0; i < direction; i++)
-		deleteCharacter(buffer, cursor_index);
+	{
+		for (;;)
+		{
+			deleteCharacter(buffer, cursor_index);
+			char next_byte = cursor_get_byte(view_handle, cursor_index, 1);
+			if (utf8_initial_byte(next_byte))break;
+		}
+
+	}
 
 	for (int i = 0; i < -direction; i++)
-		removeCharacter(buffer, cursor_index);
-}
+	{
+		for (;;)
+		{
+			char next_byte = cursor_get_byte(view_handle, cursor_index, -1);
+			removeCharacter(buffer, cursor_index);
+			if (utf8_initial_byte(next_byte))break;
+		}
+	}
+} 
 
 external int selection_length(ViewHandle view_handle, int cursor_index)
 {
@@ -641,14 +608,17 @@ external Location location_from_cursor(ViewHandle viewHandle, int cursor_index)
 
 }
 
-external void **function_info_ptr(void *handle, void *function)
+external void *function_info_ptr(void *handle, void *function)
 {
 	BindingIdentifier bi = { 1, function };
-	void **data=0;
-	if (lookup(&((CommonBuffer *)handle)->bindingMemory, bi, &data))
+	void *data=0;
+	CommonBuffer *cb = (CommonBuffer *)handle;
+	if (cb->bindingMemory.lookup(bi, &data))
 		return data;
-	else
-		return insert(&((CommonBuffer *)handle)->bindingMemory, bi, data);
+	
+	cb->bindingMemory.insert(bi, data);
+	assert(cb->bindingMemory.lookup(bi, &data));
+	return data; // @CLEANUP HASHTABLE_API....
 }
 
 external void *memory_alloc(void *handle, size_t size)
@@ -997,5 +967,72 @@ external void history_insert_waypoint(ViewHandle handle)
 	Add(&tb->backingBuffer->history.waypoints, tb->backingBuffer->history.state.location.prev_instruction_index);
 }
 
+
+
+
+
+int diffIndexMove(Layout *root, int active_index, int dir, LayoutType type)
+{
+	int ack = 0;
+	if (!dir)return 0;
+	if (dir > 0)
+	{ // move right / down / forward
+		LayoutLocator locator = locateLayout(root, active_index);
+		if (!locator.parent)return 0;
+		do
+		{
+			if (locator.child_index < locator.parent->number_of_children - 1 && locator.parent->type == type)
+			{
+				Layout *target_layout = locator.parent->children[locator.child_index + 1];
+				ack += favourite_descendant(target_layout);
+				locator.parent->favourite_child = locator.child_index + 1;
+				return ack + 1;
+			}
+			for (int i = locator.child_index + 1; i < locator.parent->number_of_children; i++)
+			{
+				ack += number_of_leafs(locator.parent->children[i]);
+			}
+		} while (parentLayout(root, locator, &locator));
+	}
+	else
+	{ //move left / up / back
+		LayoutLocator locator = locateLayout(root, active_index);
+		if (!locator.parent)return 0;
+		do
+		{
+			if (locator.child_index > 0 && locator.parent->type == type)
+			{
+				Layout *target_layout = locator.parent->children[locator.child_index - 1];
+				ack += number_of_leafs(target_layout);
+				ack = -ack;
+				ack += favourite_descendant(target_layout);
+				locator.parent->favourite_child = locator.child_index - 1;
+				return ack;
+			}
+			for (int i = 0; i < locator.child_index; i++)
+			{
+				ack += number_of_leafs(locator.parent->children[i]);
+			}
+		} while (parentLayout(root, locator, &locator));
+	}
+	return 0;
+}
+
+external void move_layout(int dir, LayoutType type)
+{
+	int new_index= diffIndexMove(global_data->layout,global_data->activeTextBufferIndex,dir,type);
+	global_data->activeTextBufferIndex = clamp(global_data->activeTextBufferIndex+new_index, 0, global_data->textBuffers.length);
+}
+
+external void set_layout(Layout *layout)
+{
+	global_data->layout = layout;
+}
+
+
+external int get_num_views()
+{
+	return global_data->textBuffers.length;
+}
 
 

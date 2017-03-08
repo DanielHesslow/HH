@@ -2,6 +2,7 @@
 #define HEADER
 //although the actual name of the marker where text is to be inserted is a called a cursor I call it caret to disambigueate between that and the mouse cursor.
 // I don't know if that is a good decision but that is how I do it. well sometimes I don't so now it's real wierd.
+#define external extern "C" __declspec(dllexport)
 
 typedef int8_t 	int8; 
 typedef int16_t int16; 
@@ -69,7 +70,7 @@ struct Bitmap
 
 #define DHEN_NAME InputType
 #define DHEN_PREFIX input
-#define DHEN_VALUES X(character) X(key) X(mouseWheel)
+#define DHEN_VALUES X(keyboard) X(mouseWheel)
 #include "enums.h"
 #undef DHEN_VALUES
 #undef DHEN_NAME
@@ -85,16 +86,21 @@ struct Bitmap
 struct Input
 {
 	InputType inputType;
+	char *utf8;
+	int utf8_len;
+	uint16_t VK_Code;
+
 	union
 	{
-		char character;
-		uint16_t VK_Code;
 		int16_t mouseWheel;
 	};
 	bool caps;
-	bool control;
-	bool shift;
-	bool alt;
+	bool control_left;
+	bool control_right;
+	bool shift_left;
+	bool shift_right;
+	bool alt_left;
+	bool alt_right;
 };
 
 
@@ -212,8 +218,26 @@ struct HistoryChangeTracker
 	bool move_change;
 };
 
-DEFINE_HashTable(BindingIdentifier, PVOID, silly_bind_ident_hash, bind_ident_eq)
-DEFINE_HashTable(PVOID, HistoryChangeTracker, silly_hash_void_ptr, ptr_eq)
+//DEFINE_HashTable(BindingIdentifier, PVOID, silly_bind_ident_hash, bind_ident_eq)
+//DEFINE_HashTable(PVOID, HistoryChangeTracker, silly_hash_void_ptr, ptr_eq)
+
+#define HT_ALLOC(num_bytes) Allocate(*allocator, num_bytes, "multi gap buffer");
+#define HT_FREE(ptr,num_bytes) DeAllocate(*allocator, ptr);
+#define HT_ALLOCATOR DH_Allocator *
+
+// @LEAK @CLEANUP use allocator!
+#define HT_NAME HashTable_BindingIdentifier_PVOID 
+#define HT_HASH(x) silly_bind_ident_hash(x)
+#define HT_KEY BindingIdentifier
+#define HT_VALUE void *
+#define HT_EQUAL(a,b) bind_ident_eq(a,b)
+#include "L:\HashTable.h"
+
+#define HT_NAME HashTable_PVOID_HistoryChangeTracker 
+#define HT_HASH(x) silly_hash_void_ptr(x)
+#define HT_KEY void *
+#define HT_VALUE HistoryChangeTracker
+#include "L:\HashTable.h"
 
 struct CommonBuffer
 {
@@ -263,10 +287,24 @@ internal inline bool int_eq(int a, int b)
 	return a == b;
 }
 
-int silly_hash_char32_t(char32_t c) { return silly_hash((int)c); }
-bool char32_t_eq(char32_t a, char32_t b) { return a == b; }
-DEFINE_HashTable(ulli, CharBitmap, silly_hash_lli, lli_eq);
-DEFINE_HashTable(char32_t, int, silly_hash_char32_t, int_eq);
+//DEFINE_HashTable(ulli, CharBitmap, silly_hash_lli, lli_eq);
+//DEFINE_HashTable(char32_t, int, silly_hash_char32_t, int_eq);
+
+
+
+// NOTE ALLOCATOR IS WRONG NOW. we will leak :/ @LEAK @CLEANUP
+#define HT_NAME HashTable_ulli_CharBitmap
+#define HT_KEY unsigned long long
+#define HT_VALUE CharBitmap
+#define HT_HASH(x) silly_hash_lli(x);
+#include "L:\HashTable.h"
+
+#define HT_NAME HashTable_char32_t_int
+#define HT_KEY char32_t
+#define HT_VALUE int
+#define HT_HASH(x) silly_hash(x);
+#include "L:\HashTable.h"
+
 
 struct Typeface
 {

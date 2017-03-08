@@ -28,22 +28,17 @@ BackingBuffer *platform_execute_command(char *command, int command_len)
 		char buffer[500];
 		snprintf(buffer, sizeof(buffer), "cmd.exe /C %.*s", command_len, command);
 
-		if (CreateProcess(0, buffer, 0, 0, true, CREATE_UNICODE_ENVIRONMENT, 0, 0, &si, &pi))
+		if (CreateProcess(0, buffer, 0, 0, true, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, 0, 0, &si, &pi))
 		{
-			//we should maybe not wait here, just lock this buffer?
-			//this might take some time and should freeze us!
+			//we should not wait here, just lock this buffer?
+			//this might take time and freze the program..!
 
-			//from msdn, do it:
-			//Use caution when calling the wait functions and code that directly or indirectly creates windows.
-			//If a thread creates any windows, it must process messages.Message broadcasts are sent to all windows in the system.
-			//A thread that uses a wait function with no time - out interval may cause the system to become deadlocked.
-			//Two examples of code that indirectly creates windows are DDE and the CoInitialize function.
-			//Therefore, if you have a thread that creates windows, use MsgWaitForMultipleObjects or MsgWaitForMultipleObjectsEx, rather than WaitForSingleObject.
-
-			while (WaitForSingleObject(pi.hProcess, 1) == WAIT_TIMEOUT)
+			CloseHandle(writePipe);
+			DWORD q;
+			for (;;)
 			{
 				DWORD len;
-				ReadFile(readPipe, buffer, sizeof(buffer), &len, 0);
+				if(!ReadFile(readPipe, buffer, sizeof(buffer), &len, 0))break;
 				for (int i = 0; i < len; i++)
 				{
 					appendCharacter(backingBuffer->buffer, backingBuffer->buffer->cursor_ids.start[0].id, buffer[i]);
@@ -51,11 +46,8 @@ BackingBuffer *platform_execute_command(char *command, int command_len)
 			}
 
 			CloseHandle(readPipe);
-			CloseHandle(writePipe);
-
 			CloseHandle(pi.hProcess);
 			CloseHandle(pi.hThread);
-
 			initial_mgb_process(backingBuffer->buffer);
 			return backingBuffer;
 		}
@@ -70,6 +62,5 @@ BackingBuffer *platform_execute_command(char *command, int command_len)
 		//todo handle and log
 		assert(false);
 	}
-
 	return 0;
 }

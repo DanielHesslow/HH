@@ -1,9 +1,53 @@
 #include "History.h"
 
+// RATIONALE / DESIGN DECISSIONS
+// Why the fuck is this history handeling 800 lines long?
+// like what were you thinking, this is trivial, right?
 
-// STILL BUGGY 
+// Nah, man, not totally trivial anyway. 
+// First off we're never overwriting history, so we've got a DAG, (directed asyclic graph).
+// Second, we need to not waste a bunch of memory, it's totally valid to write code for 10 hours straight, a lot of stuff can happen in that time
+// Most of the complexity of this code is because of optimizations on memory consumptions
+// eg, DAGs ususually have a transision matrix but the normal case for us is one branch forward and no branch otherwise
+// sometimes we have no branch forward, sometimes we have branches elsewhere
+// therefor the forward branch is implicit except if some other branch ends there.
+
+// Saving all information for a certain action is not ok, usually we manipulate in the same view and the same cursors multiple times
+// if we'd save that info we get _at least_ 8 bytes per action which is *a lot*,
+// (currently the case of a character insert is only 1 byte data + 1 byte opcode, factor of five better)
+// so we can't do that, instead we have a state which we can manipulate, usually we might go back and forth between multiple different states
+// so therefor we have what I call registers which we save down,
+
+// furthermore some instructions like move takes no data and some like set_cursor takes a bunch (like 8 or something)
+// so we have to have a variable data length, since we need to go back and forth we could either do the unicode thing and have leading bits
+// in each byte which indicates how many more bytes there are in the current instruction etc.
+// or we can have them be separate steams. I choose the latter. There might obviously be a better solution which I havn't considered. 
+
+// note all manipulations are relative to previous values, so we can undo/redo them.
+// further complicating stuff moves are lazy because we usually move multiple cursors left and right and "patching" them after they're added seemd too complicated
+
+// NOTE TODO
 // NOT YET WORKING with mutliple views
+// we need to make sure that we can only undo stuff that we've made in one view. undoing stuff in other views seems counter intuitive to me
+// certainly when/if we get networked connections from other people. 
 
+// NOTE PREF
+// we currently store branches in unsorted dynamic arrays, this makes for slow lookup times
+// same goes for undo_waypoints
+// keeping two dynamic arrays for the branches one sorted in from and one to and then doing binary searches seams quite a bit faster to me 
+// two hashtables might also work but that'd be slow for iterating over branches in order which we need for next_leaf (but that is super rare anyway)
+// however I don't see this beeing a problem anytime soon, undoing/redoing is rare, however the need to maybe branch to end on each log
+// might indicate that a hashtable for at least the to-branches might be a good idea. 
+// we'll get to that if it's needed.
+
+// Oh and we cursor additions/removes should probably be lazy as well. 
+
+// Another alternative to this is to employ full on compression, that would for sure mean we get a lower memory foot print and the local complexity goes down
+// However I don't know about the perf. Might actually be better. Might be better to keep this and do it post. IDK.
+// Currently we're where we need to be. ish.
+
+
+		
 bool at_start(History *history, HistoryLocation location);
 bool at_end(History *history, HistoryLocation location);
 bool move_backward(History *history, HistoryLocation *location);
@@ -25,9 +69,6 @@ struct InstructionData
 		DataAddRemoveCursor add_remove_cursor;
 	};
 };
-
-
-
 
 int data_length_from_opcode(HistoryOpCode op_code)
 {
@@ -289,6 +330,7 @@ void move_forward_ignore_branches(History *history, HistoryLocation *location)
 	location->prev_data_index += data_length_at_position(history, location->prev_instruction_index);
 	++location->prev_instruction_index;
 }
+
 bool move_forward(History *history, HistoryLocation *location, int branch_index)
 { //state = -1 -1 = 'before buffer'
 	if (at_end(history,*location))
@@ -546,6 +588,7 @@ bool redo_(BackingBuffer *backingBuffer, int index)
 	ExpandedInstruction instr;
 	bool success = expand_instruction_at(backingBuffer, loc, &instr);
 	if (!success) return false;
+
 	switch (instr.op_code)
 	{
 	case op_remove:
@@ -626,11 +669,12 @@ void redo(BackingBuffer *backingBuffer)
 		//if (end_iteration(&instruction, &it))break;
 		redo_(backingBuffer, -1);
 		ExpandedInstruction instruction;
-		expand_instruction_at(backingBuffer, history->state.location, &instruction);
+		if (!expand_instruction_at(backingBuffer, history->state.location, &instruction))return;
 		if (instruction.textBuffer)
 			markPreferedCaretXDirty(instruction.textBuffer, instruction.cursor_id_index);
 	} while (!waypoint_at(history, history->state.location.prev_instruction_index));
 }
+
 void undo(BackingBuffer *backingBuffer)
 {
 	History *history = &backingBuffer->history;
@@ -638,7 +682,7 @@ void undo(BackingBuffer *backingBuffer)
 	do{
 		if (!can_undo(history, history->state.location))break;
 		ExpandedInstruction instruction;
-		expand_instruction_at(backingBuffer, history->state.location, &instruction);
+		if(!expand_instruction_at(backingBuffer, history->state.location, &instruction))return;
 		undo_(backingBuffer);
 		if (instruction.textBuffer)
 			markPreferedCaretXDirty(instruction.textBuffer, instruction.cursor_id_index);
@@ -677,7 +721,7 @@ bool is_leaf(History *history, HistoryLocation location)
 	return false;
 }
 
-
+// obtains the location of the next leaf
 HistoryLocation next_leaf(History *history, HistoryLocation current)
 {
 	//NOTE PERFORMANCE, branches in unsorted array lol
@@ -717,7 +761,7 @@ HistoryLocation next_leaf(History *history, HistoryLocation current)
 
 
 #include"L:\MemStack.h"
-
+//undos/redos to set the buffer to the next leafs state.
 void next_leaf(BackingBuffer *backingBuffer)
 {
 	//NOTE PERFORMANCE, branches in unsorted array lol

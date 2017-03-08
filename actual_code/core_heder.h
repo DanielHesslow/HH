@@ -3,7 +3,6 @@
 
 #include "stdint.h"
 #include "math.h"
-#include "Layout.h"
 
 #define internal static 
 
@@ -31,7 +30,7 @@ enum Mods
 	mod_alt_left = 1 << 9 | mod_alt,
 };
 
-Mods operator | (Mods a, Mods b) { return static_cast<Mods>(static_cast<int>(a) | static_cast<int>(b)); }
+constexpr Mods operator | (Mods a, Mods b) { return (Mods)((int)(a) | (int)(b)); }
 
 
 

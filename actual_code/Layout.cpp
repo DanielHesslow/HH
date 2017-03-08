@@ -24,6 +24,10 @@ Layout *createLayout(LayoutType type, int width,  int number_of_args, ...)
 	return ret;
 }
 
+
+
+
+
 int favourite_descendant(Layout *layout)
 {
 	if (layout == 0)
@@ -111,46 +115,3 @@ bool parentLayout(Layout *root, LayoutLocator locator, LayoutLocator *result)
 	*result = { 0,0 };
 	return false;
 }
-
-
-void test()
-{
-	Layout *leaf = (Layout *)0;
-	assert(total_number_of_children(CREATE_LAYOUT(layout_type_x, 2, leaf, .5f, leaf)) == 2);
-	assert(total_number_of_children(CREATE_LAYOUT(layout_type_x, 2, leaf)) == 1);
-	assert(total_number_of_children(CREATE_LAYOUT(layout_type_x, 2, leaf, 0.5f, leaf, 0.6f, leaf)) == 3);
-	assert(total_number_of_children(CREATE_LAYOUT(layout_type_x, 2, CREATE_LAYOUT(layout_type_x, 2, leaf, 0.5f, leaf), 0.5f, leaf, 0.6f, leaf)) == 5);
-
-	assert(number_of_leafs(CREATE_LAYOUT(layout_type_x, 2, leaf, .5f, leaf)) == 2);
-	assert(number_of_leafs(CREATE_LAYOUT(layout_type_x, 2, leaf)) == 1);
-	assert(number_of_leafs(CREATE_LAYOUT(layout_type_x, 2, leaf, 0.5f, leaf, 0.6f, leaf)) == 3);
-	assert(number_of_leafs(CREATE_LAYOUT(layout_type_x, 2, CREATE_LAYOUT(layout_type_x, 2, leaf, 0.5f, leaf), 0.5f, leaf, 0.6f, leaf)) == 4);
-
-	assert(total_number_of_children(leaf) == 0);
-	assert(number_of_leafs(leaf) == 1);
-
-
-	Layout *l = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.5, leaf);
-	Layout *r = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.5, leaf);
-	Layout p = {};
-	p.children[0] = l;
-	p.children[1] = r;
-	p.number_of_children = 2;
-	LayoutLocator loc;
-	loc = locateLayout(&p,0);
-	assert(loc.child_index == 0);
-	assert(loc.parent == l);
-
-	loc = locateLayout(&p, 1);
-	assert(loc.child_index == 1);
-	assert(loc.parent == l);
-
-	loc = locateLayout(&p, 2);
-	assert(loc.child_index == 0);
-	assert(loc.parent == r);
-	
-	loc = locateLayout(&p, 3);
-	assert(loc.child_index == 1);
-	assert(loc.parent == r);
-}
-

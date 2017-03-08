@@ -1,6 +1,6 @@
 #ifndef LayoutHeader
 #define LayoutHeader
-
+#include "DH_MacroAbuse.h"
 
 enum LayoutType
 {
@@ -44,4 +44,6 @@ int number_of_leafs(Layout *layout);
 int total_number_of_children(Layout *layout);
 int favourite_descendant(Layout *layout);
 Layout *createLayout(LayoutType type, int width, int number_of_args, ...);
+
+
 #endif

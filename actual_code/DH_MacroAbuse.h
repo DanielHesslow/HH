@@ -35,8 +35,14 @@
 // --- DEBUG STUFF---
 
 #undef assert
+#ifdef WINDOWED
 #define assert(cond) do { if(!(cond)){if(MessageBox(NULL, DHMA_STRING(cond) "\n" DHMA_STRING_(__LINE__) ", " __FILE__ ,  "assert failed"  , MB_OKCANCEL)!=IDOK)ExitProcess(0); if (IsDebuggerPresent())__debugbreak();}}while(0)
 #define alert(msg) do{MessageBox(NULL, msg "\n" DHMA_STRING_(__LINE__) ", " __FILE__ , "alert",MB_OK);} while (0);
+#else
+#define assert(cond) do { if(!(cond)){fprintf(stderr, "assertion failed" DHMA_STRING(cond) "\n" DHMA_STRING_(__LINE__) ", " __FILE__  ); if (IsDebuggerPresent())__debugbreak(); else ExitProcess(0);}}while(0)
+#define alert(msg) do{MessageBox(NULL, msg "\n" DHMA_STRING_(__LINE__) ", " __FILE__ , "alert",MB_OK);} while (0);
+#endif
+
 char OutputDebugString_buffer[500];
 #define dpr(integer)\
 snprintf(OutputDebugString_buffer, sizeof(OutputDebugString_buffer),DHMA_STRING(integer) ": %d (" DHMA_STRING_(__LINE__) ", " __FILE__ ")\n", integer);\

@@ -22,7 +22,7 @@ set buildmode=.%1
 
 pushd ..\..\build
 
-set flags= /Zi -Femain.exe  ..\HH\actual_code\win32.cpp user32.lib gdi32.lib 
+set flags= /Zi -Femain.exe  ..\HH\actual_code\win32.cpp user32.lib gdi32.lib advapi32.lib
 
 :Loop
 SHIFT
