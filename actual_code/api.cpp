@@ -389,6 +389,8 @@ external void append_byte(ViewHandle view_handle, int cursor_index, int directio
 
 	for (int i = 0; i < -direction; i++)
 		appendCharacter(buffer, byte, cursor_index);
+
+	setNoSelection(buffer, do_log);
 }
 
 bool utf8_initial_byte(unsigned char byte) {

@@ -713,7 +713,7 @@ void undo(BackingBuffer *backingBuffer)
 		undo_(backingBuffer);
 		if (instruction.textBuffer)
 			markPreferedCaretXDirty(instruction.textBuffer, instruction.cursor_id_index);
-	}while (!waypoint_at(history, history->state.location.prev_instruction_index));
+	} while (!waypoint_at(history, history->state.location.prev_instruction_index));
 }
 
 bool has_branch_from_instruction(History *history, int prev_instruction_index)

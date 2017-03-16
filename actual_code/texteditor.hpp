@@ -969,15 +969,14 @@ internal void appendCharacter(TextBuffer *textBuffer, char character, int caretI
 	int caretId = textBuffer->ownedCarets_id.start[caretIdIndex];
 	Location loc = getLocationFromCaret(textBuffer, caretId);
 	
-	if (log)
-	{
-		log_add(&textBuffer->backingBuffer->history, -1, character,caretId,textBuffer->textBuffer_id);
-	}
 	appendCharacter(textBuffer->backingBuffer->buffer, caretId, character);
+	if (log) {
+		log_add(&textBuffer->backingBuffer->history, -1, character, caretId, textBuffer->textBuffer_id);
+	}
+	
 	change_added(textBuffer->backingBuffer, loc, character);
 
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
-	setNoSelection(textBuffer, log ? do_log : no_log);
 }
 
 internal void appendCharacter(TextBuffer *textBuffer, char character)
@@ -997,7 +996,7 @@ internal bool removeCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log
 
 
 	char toBeRemoved = *get(textBuffer->backingBuffer->buffer, caretId, dir_left);
-	bool removed = removeCharacter(textBuffer->backingBuffer->buffer,&textBuffer->backingBuffer->history, log, caretId);
+	bool removed = removeCharacter(textBuffer->backingBuffer->buffer, &textBuffer->backingBuffer->history, log, caretId);
 	if(removed)change_removed(textBuffer->backingBuffer, loc, toBeRemoved);
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
 	if (removed && log)
@@ -2350,17 +2349,16 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 	int glyph_index = getGlyph(font, codepoint);
 	stbtt_fontinfo *font_info = font->font_info;
 
-	//stride's additional 2 comes from where exactey, hadn't we allready taken that into account?
 	int width, height;
 	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale * 3, scale, glyph_index, &width, &height, &xOff, &yOff); //statically allocate a bunch here?
 	float die_off = 1.5; // [1.5,2]
 	float intensity = 1;
 	float subpix_bleed[] = { .5f * intensity / 3, .5f *intensity*die_off / 3 , .5f *intensity / (3 * die_off) };
 	
-	int bleed_extra_per_row = ciel_divide((ARRAY_LENGTH(subpix_bleed) - 1) * 2, 3);
+	int bleed_extra_per_row = ciel_divide((ARRAY_LENGTH(subpix_bleed) - 1) * 2, 3); 
 	int color_stride = (ciel_divide(width + 2, 3) + bleed_extra_per_row) + 1;
-
-	uint8_t *new_mem = (uint8_t *)font_allocator->alloc_and_zero(color_stride * 3 * height).mem; 
+	int simd_load_pad = 16; // certainly overkill. but I don't wanna think about a couple of bytes right now. //@Memory
+	uint8_t *new_mem = (uint8_t *)font_allocator->alloc_and_zero(color_stride * 3 * height+ simd_load_pad).mem;
 	uint8_t *row_from = (uint8_t *)charBitmapMem;
 	uint8_t *colors[3] =
 	{
@@ -3024,14 +3022,24 @@ void mark_selection(TextBuffer *textBuffer)
 	{
 		Location c = getLocationFromCaret(textBuffer, textBuffer->ownedCarets_id.start[i]);
 		Location s = getLocationFromCaret(textBuffer, textBuffer->ownedSelection_id.start[i]);
-
 		if (!(c.line == s.line && c.column == s.column))
 		{
 			if (c.line > s.line || c.line == s.line && c.column > s.column)
 				change_rendering_highlight_color(textBuffer, s, c, active_colorScheme.highlightColor, &mark_selection);
 			else
 				change_rendering_highlight_color(textBuffer, c, s, active_colorScheme.highlightColor, &mark_selection);
+			//dprs("carets are apart\n");
 		}
+#if 0
+		//debug
+		else {
+			if (indexFromId(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[i]) > indexFromId(textBuffer->backingBuffer->buffer, textBuffer->ownedSelection_id.start[i])) {
+				dprs("caret is after \n");
+			} else {
+				dprs("caret is before\n");
+			}
+		}
+#endif
 	}
 }
 

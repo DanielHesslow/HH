@@ -241,59 +241,11 @@ internal bool is_big_title(void *buffer_handle, int line) {
 	return false;
 }
 
-internal void init_big_titles(void *buffer_handle, std::set<int> *big_titles) {
-	big_titles->clear();
-	for (int i = 0; i < num_lines(buffer_handle); i++) {
-		if (is_big_title(buffer_handle, i)) {
-			//insert(memo, i, true);
-			big_titles->insert(i);
-		}
-	}
-}
 
 
 internal void mark_bigTitles(void *view_handle) {
-	bool changed = false;
-
 	void *buffer_handle = buffer_handle_from_view_handle(view_handle);
-	std::set<int> *big_titles;
-
-	void **mem = function_info_ptr(buffer_handle, &mark_bigTitles);
-	if (*mem) {
-		big_titles = (std::set<int> *)*mem;
-	}
-	else {
-		big_titles = (std::set<int> *)memory_alloc(buffer_handle, sizeof(std::set<int>)).mem;
-		new (big_titles)std::set<int>();
-		changed = true;
-		init_big_titles(buffer_handle, big_titles);
-		*mem = big_titles;
-	}
-#if 0
-	BufferChange event;
-	while (api.changes.next_change(buffer_handle, &mark_bigTitles, &event)) {
-		changed = true;
-		api.changes.mark_all_read(buffer_handle, &mark_bigTitles);
-
-		if (is_big_title(buffer_handle, event.location.line))
-			big_titles->insert(event.location.line);
-		else
-			big_titles->erase(event.location.line);
-
-		//lazy af way to handle linebreak lol
-		if (is_big_title(buffer_handle, event.location.line - 1))
-			big_titles->insert(event.location.line - 1);
-		else
-			big_titles->erase(event.location.line - 1);
-
-
-		if (is_big_title(buffer_handle, event.location.line + 1))
-			big_titles->insert(event.location.line + 1);
-		else
-			big_titles->erase(event.location.line + 1);
-	}
-#endif
-	if (changed) {
+	{
 		void *view_handle;
 		ViewIterator vi = view_iterator_from_buffer_handle(buffer_handle);
 		while (view_iterator_next(&vi, &view_handle)) {
@@ -301,10 +253,12 @@ internal void mark_bigTitles(void *view_handle) {
 			markup_remove(view_handle, &mark_bigTitles);
 
 
-			for (auto it = big_titles->begin(); it != big_titles->end(); ++it) {
-				int line = *it;
-				markup_scale(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, title_size);
-				markup_text_color(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, default_colorScheme.active_color);
+			for (int i = 0; i < num_lines(buffer_handle); i++) {
+				int line = i;
+				if (is_big_title(buffer_handle, line)) {
+					markup_scale(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, title_size);
+					markup_text_color(view_handle, &mark_bigTitles, { line, 0 }, { line + 1,0 }, default_colorScheme.active_color);
+				}
 			}
 		}
 	}
@@ -514,6 +468,7 @@ external void bindings(char VK_CODE, Mods mods, char *utf8, int utf8_len) {
 		if (utf8[0] == ' ' || utf8[0] == '\n')
 			history_insert_waypoint(view);
 	}
+	mark_bigTitles(view);
 #undef M
 }
 
