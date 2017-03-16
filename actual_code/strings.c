@@ -1,3 +1,5 @@
+#define ALLOC(num_bytes,message) malloc(num_bytes)
+#define FREE(ptr) free(ptr)
 #define DEFINE_strlen(type)\
  int DHSTR_strlen(type *string)\
 {\
@@ -18,7 +20,7 @@ DEFINE_strlen(char32_t);
  type_to *create##type_to##From##type_from(type_from *string)\
 {\
 	int length = DHSTR_strlen(string);\
-	type_to *newString = ((type_to *)alloc_(sizeof(type_from)*(length+1),DHMA_STRING(create##type_to##From##type_from))); \
+	type_to *newString = ((type_to *)ALLOC(sizeof(type_from)*(length+1),DHMA_STRING(create##type_to##From##type_from))); \
 	\
 	for (int i = 0; i < length; i++)\
 	{\
@@ -38,7 +40,7 @@ type* mergeStrings(type *a, type *b)\
 {\
 	int aLength = DHSTR_strlen(a);\
 	int bLength = DHSTR_strlen(b);\
-	type *newString = (type *)alloc_(sizeof(type)*(aLength +bLength + 1),"mergeStrings");\
+	type *newString = (type *)ALLOC(sizeof(type)*(aLength +bLength + 1),"mergeStrings");\
 	for (int i= 0; i < aLength; i++)\
 	{\
 		newString[i] = a[i];\
@@ -58,7 +60,7 @@ DEFINE_MergeStrings(char16_t);
  void append(type **a, type *b)\
 {\
 	type *ret = mergeStrings(*a, b);\
-	free_(*a);\
+	FREE(*a);\
 	*a = ret;\
 }
 DEFINE_Append(char);
@@ -88,7 +90,7 @@ DEFINE_getLast(wchar_t)
  char16_t *copyUntil(char16_t *string, char16_t *last_exclusive)
 {
 	int length = last_exclusive - string; // is this right??;
-	char16_t *newString =(char16_t *) alloc_((length+1)*sizeof(char16_t),"getToAsString"); // +1 == '\0'
+	char16_t *newString =(char16_t *)ALLOC((length+1)*sizeof(char16_t),"getToAsString"); // +1 == '\0'
 	for (int i = 0; i < length; i++)
 	{
 		newString[i] = string[i];
@@ -100,7 +102,7 @@ DEFINE_getLast(wchar_t)
  char16_t *copyFrom(char16_t *string, char16_t *first_inclusive)
 {
 	int length = string+DHSTR_strlen(string)-first_inclusive-1; // is this right??;
-	char16_t *newString = (char16_t *)alloc_((length + 1) * sizeof(char16_t), "getToAsString"); // +1 == '\0'
+	char16_t *newString = (char16_t *)ALLOC((length + 1) * sizeof(char16_t), "getToAsString"); // +1 == '\0'
 	for (int i = 0; i < length; i++)
 	{
 		newString[i] = first_inclusive[i+1];
@@ -167,7 +169,7 @@ DEFINE_strcmpWeak(wchar_t);
  type *strcpy(type *string)\
 {\
 	int length = DHSTR_strlen(string);\
-	type *newString = ((type *)alloc_(sizeof(type)*(length+1),DHMA_STRING(strcpy type))); \
+	type *newString = ((type *)ALLOC(sizeof(type)*(length+1),DHMA_STRING(strcpy type))); \
 	\
 	for (int i = 0; i < length; i++)\
 	{\
@@ -450,10 +452,7 @@ constexpr int hash_string_constexpr(char *string, int s = 0) //allright because 
 int hash_string(char *string)
 {
 	int ack = *string;
-	while (*++string)
-	{
-		ack = ack * 31 + *string;
-	}
+	while (*++string) ack = ack * 31 + *string;
 	return ack;
 }
 
@@ -553,3 +552,5 @@ char *DHSTR_utf8FromString(DHSTR_String string, void* buffer, size_t buffer_len)
 
 #define NULL_TEMINATE_SNPRINTF
 
+#undef ALLOC
+#undef FREE

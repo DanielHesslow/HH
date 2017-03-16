@@ -1,7 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <cstdio>
-#include "Allocation.h"
 
 
 #define PAGES 800;
@@ -258,7 +257,7 @@ internal void win32_StoreInClipboard(InternalClipboard *clipboard)
 	HGLOBAL customFormatMem;
 	{ //custom_format
 
-		DynamicArray_char buffer = DHDS_constructDA(char, 200,default_allocator);
+		DA_char buffer = DA_char::make(general_allocator);
 		serialize(&buffer, *clipboard);
 		
 		//this only workis if GMEM_FIXED is set. why? (GPTR = GMEM_FIXED | GMEM_ZEROINIT)
@@ -266,33 +265,34 @@ internal void win32_StoreInClipboard(InternalClipboard *clipboard)
 		GlobalLock(customFormatMem);
 			memcpy(customFormatMem, buffer.start, buffer.length);
 		GlobalUnlock(customFormatMem);
-		free_(buffer.start);
-		// dude we're not freeing... 
+		buffer.destroy();
 	}
+
+	String utf8_string = string_from_clipboard(clipboard);
 
 	HGLOBAL unicodeFormatMem;
 	{ //utf_16
-		char16_t *utf_16_string = getAsUnicode(clipboard);
-		size_t size = DHSTR_strlen(utf_16_string)*sizeof(char);
+		int len;
+		char16_t *utf16_string = utf8_string.ss_utf16(&len);
+		size_t size = len * sizeof(char16_t);
 		unicodeFormatMem = GlobalAlloc(GPTR, size);
 		GlobalLock(unicodeFormatMem);
 		{
-			memcpy(unicodeFormatMem, utf_16_string, size);
+			memcpy(unicodeFormatMem, utf16_string, size);
 		}GlobalUnlock(unicodeFormatMem);
-		free_(utf_16_string);
 	}
 		
 	HGLOBAL asciiFormatMem;
-	{	//ascii
-		char *ascii_string = getAsAscii(clipboard);
-		size_t size = strlen(ascii_string)*sizeof(char);
+	{	//utf8
+		size_t size = utf8_string.length*sizeof(char);
 		asciiFormatMem = GlobalAlloc(GPTR, size);
 		GlobalLock(asciiFormatMem);
 		{
-			memcpy(asciiFormatMem, ascii_string, size);
+			memcpy(asciiFormatMem, utf8_string.start, size);
 		}GlobalUnlock(asciiFormatMem);
-		free_(ascii_string);
 	}
+	utf8_string.destroy(general_allocator);
+
 	
 	// appearnlty calling open clipboard with a null handle does not get the current window
 	// but instead causes it to fail when empty clipboard is called
@@ -335,48 +335,38 @@ internal InternalClipboard win32_LoadFromClipboard()
 	}
 	else if (IsClipboardFormatAvailable(CF_UNICODETEXT))
 	{
-		ret.clips = DHDS_constructDA(ClipboardItem, 3,default_allocator);
-		DynamicArray_char16_t tmp = DHDS_constructDA(char16_t, 100,default_allocator);
+		ret.clips = DA_ClipboardItem::make(general_allocator);
 		OpenClipboard(0);
+		char *endless_buffer = (char *)MemStack_GetTop();
+		int len;
 		{
-			char *p = (char *)GetClipboardData(CF_UNICODETEXT);
+			char16_t *p = (char16_t *)GetClipboardData(CF_UNICODETEXT);
+			int32_t errors;
 			GlobalLock(p);
 			{
-				while (*p)
-				{
-					//if (*p == '\r' && *(p + 1) == '\n')break;
-					Add(&tmp, *p++);
-				}
-				Add(&tmp, 0);//null terminating
+				len=utf16toutf8((utf16_t *)p, lstrlenW((wchar_t *)p), endless_buffer, 2000, &errors);
 			} GlobalUnlock(p);
 		} CloseClipboard();
 		ClipboardItem item = {};
 		item.onSeperateLine = false;
-		item.string = tmp.start;
-		Add(&ret.clips, item);
+		String s = { endless_buffer,len };
+		item.string = s.copy(general_allocator);
+		ret.clips.add(item);
 	}
-
 	else if (IsClipboardFormatAvailable(CF_TEXT))
 	{
-		ret.clips = DHDS_constructDA(ClipboardItem, 10,default_allocator);
-		DynamicArray_char16_t tmp = DHDS_constructDA(char16_t, 100, default_allocator);
+		ret.clips = DA_ClipboardItem::make(general_allocator);
+		ClipboardItem item = {};
 		OpenClipboard(0);
 		{
 			char *p = (char *)GetClipboardData(CF_TEXT);
 			GlobalLock(p);
 			{
-				while (*p)
-				{
-					//if (*p == '\r' && *(p + 1) == '\n')break;
-					Add(&tmp, *p++);
-				}
-				Add(&tmp, 0); //null terminating
+				item.string = String::make(p).copy(general_allocator);
 			} GlobalUnlock(p);
 		} CloseClipboard();
-		ClipboardItem item = {};
 		item.onSeperateLine = false;
-		item.string = tmp.start;
-		Add(&ret.clips, item);
+		ret.clips.add(item);
 	}
 
 	return ret;
@@ -401,8 +391,6 @@ void loadFonts()
 	HKEY hKey;
 	LONG result;
 
-	DH_Allocator macro_used_allocator = stack_allocator;
-
 	result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, fontRegistryPath, 0, KEY_READ, &hKey);
 	if (result != ERROR_SUCCESS) {
 		return;
@@ -422,7 +410,7 @@ void loadFonts()
 
 	char winDir[MAX_PATH]; //the maxpath isn't really maxpath anymore but I'm fairly confident that the windows file is inside of maxdir though...
 	GetWindowsDirectory(winDir, MAX_PATH);
-	DHSTR_String system_fonts_file = DHSTR_MERGE(DHSTR_MAKE_STRING(winDir), DHSTR_MAKE_STRING("\\FONTS\\"),alloca);
+	String system_fonts_file = String::make(winDir);
 	//load the font
 	do {
 		wsFontFile = "";
@@ -432,27 +420,34 @@ void loadFonts()
 		result = RegEnumValue(hKey, valueIndex, valueName, &valueNameSize, 0, &valueType, (BYTE *)valueData, &valueDataSize);
 		valueIndex++;
 		bool success;
-		char *extension= getLast(valueData, '.', &success);
+		String value_data = String::make(valueData);
+		int dot_idx = value_data.find_last('.');
+		char *extension = valueData + dot_idx;
 		if (strcmp(".ttf", extension) && strcmp(".TTF", extension)){
 			continue; //something other than ttf
 		}
-		char *paren = getLast(valueName, '(', &success);
-		*paren = 0;
-		trimEnd(valueName, "Regular ");
-		trimEnd(valueName, "regular ");
+		String str = String::make(valueName); // why though?
+		int paren_idx;
+		if ((paren_idx = str.find_last('(')) != -1) {
+			str.trim_end(str.length - paren_idx);
+		}
+		str.trim_end(String::make(" "));
+		str.trim_end(String::make("Regular"));
+		str.trim_end(String::make("regular"));
 
 		AvailableFont typeface = {};
-		typeface.name = DHSTR_CPY(DHSTR_MAKE_STRING(valueName),ALLOCATE);
+		typeface.name = str.copy(font_allocator);
 		
 		if ((valueData[1] == ':') && false)
 		{
-			typeface.path = DHSTR_CPY(DHSTR_MAKE_STRING(valueData), ALLOCATE);
+			typeface.path = value_data.copy(font_allocator);
 		} else
 		{
-			typeface.path = DHSTR_MERGE(system_fonts_file, DHSTR_MAKE_STRING(valueData),ALLOCATE);
+			// slow isch... add a merge?? add ss.copy cause these are actually permanent
+			typeface.path = ss_sprintf("%s\\FONTS\\%s", winDir, value_data.start).copy(font_allocator);
 		}
 
-		Insert(&availableFonts, typeface, ordered_insert_dont_care);
+		availableFonts.add(typeface);
 	} while (result != ERROR_NO_MORE_ITEMS);
 	RegCloseKey(hKey);
 #if 0
@@ -593,7 +588,7 @@ WinMain(HINSTANCE instance,
 
 	//textBuffer = openFileIntoNewBuffer(u"notes.txt", &success);
 	//textBuffer.fileName = u"hello.c";
-	DynamicArray_PTextBuffer textBuffers = DHDS_constructDA(PTextBuffer,2, default_allocator);
+	DA_PTextBuffer textBuffers = DA_PTextBuffer::make(general_allocator);
 	
 	loadFonts();
 
@@ -604,8 +599,9 @@ WinMain(HINSTANCE instance,
 	data.commandLine = buffer;
 	data.activeTextBufferIndex = 0;
 	data.menu = {};
-	data.menu.allocator = arena_allocator(allocateArena(KB(64), platform_allocator, "menu user arena"));
-	data.menu.items = DHDS_constructDA(MenuItem, 50, default_allocator);
+	data.menu.allocator= general_allocator->make_new<DH_SlowTrackingArena, DH_TrackingAllocator *, char *>(&tracking_raw, "backing buffer user");
+
+	data.menu.items = DA_MenuItem::make(general_allocator);
 	//Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
 	//Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
 

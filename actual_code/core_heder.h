@@ -19,15 +19,15 @@ struct Location
 enum Mods
 {
 	mod_none = 0,
-	mod_alt = 1 << 1,
-	mod_control = 1 << 2,
-	mod_shift = 1 << 3,
-	mod_shift_left = 1 << 4 | mod_shift,
-	mod_shift_right = 1 << 5 | mod_shift,
-	mod_control_left = 1 << 6 | mod_control,
-	mod_control_right = 1 << 7 | mod_control,
-	mod_alt_right = 1 << 8 | mod_alt,
-	mod_alt_left = 1 << 9 | mod_alt,
+	mod_alt = 1 << 0,
+	mod_control = 1 << 1,
+	mod_shift = 1 << 2,
+	mod_shift_left = 1 << 3 | mod_shift,
+	mod_shift_right = 1 << 4 | mod_shift,
+	mod_control_left = 1 << 5 | mod_control,
+	mod_control_right = 1 << 6 | mod_control,
+	mod_alt_right = 1 << 7 | mod_alt,
+	mod_alt_left = 1 << 8 | mod_alt,
 };
 
 constexpr Mods operator | (Mods a, Mods b) { return (Mods)((int)(a) | (int)(b)); }

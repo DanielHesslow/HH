@@ -1,8 +1,14 @@
-#pragma once
+#ifndef INTRINSICS_H
+#define INTRINSICS_H
 
 #ifdef _WIN32
 #include "intrin.h"
 #include "stdint.h"
+
+
+
+
+
 
 bool BSR64(int *index, int64_t value) {
 	unsigned long pindex;
@@ -22,4 +28,4 @@ bool BSF64(int *index, int64_t value) {
 #else 
 
 #endif
-
+#endif

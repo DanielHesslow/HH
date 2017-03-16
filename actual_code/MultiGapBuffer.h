@@ -1,6 +1,5 @@
 #ifndef MULTIGAPBUFFER_H
 #define MULTIGAPBUFFER_H
-#include "DH_DataStructures.h"
 
 struct MGB_Iterator
 {
@@ -14,30 +13,39 @@ struct  BufferBlock
 	int length;
 };
 
-DEFINE_DynamicArray(BufferBlock);
+#define DA_TYPE BufferBlock
+#define DA_NAME DA_BufferBlock
+#include "DynamicArray.h"
 
 struct CursorIdentifier
 {
 	int textBuffer_index;
 	int id;
 };
-DEFINE_DynamicArray(CursorIdentifier);
+
+#define DA_TYPE CursorIdentifier
+#define DA_NAME DA_CursorIdentifier
+#include "DynamicArray.h"
 
 
 struct MultiGapBuffer
 {
-	char *start;
-	DynamicArray_BufferBlock blocks;
-	int capacity;
+	union {
+		MemBlock block;
+		struct {
+			char *start;
+			int capacity;
+		};
+	};
+	//these two really are ordered *and* connected so maybe change how this works?
+	DA_BufferBlock blocks;
+	DA_CursorIdentifier cursor_ids;
 	int running_cursor_id;
-	DynamicArray_CursorIdentifier cursor_ids;
-	DH_Allocator allocator;
+	DH_Allocator *allocator;
 };
 
 internal char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it);
 internal int get(MultiGapBuffer *buffer, char *character);
-internal char *get(MultiGapBuffer *buffer, int pos);
-internal char *get(MultiGapBuffer *buffer, int caretId, Direction dir);
 //internal MultiGapBuffer createMultiGapBuffer(int size);
 //internal void freeMultiGapBuffer(MultiGapBuffer *buffer);
 internal int length(MultiGapBuffer *buffer);
@@ -50,16 +58,15 @@ internal bool getPrev(MultiGapBuffer *buffer, MGB_Iterator *it);
 internal int indexFromId(MultiGapBuffer *buffer, int id);
 internal MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id);
 internal int AddCaret(MultiGapBuffer *buffer,int textBuffer_index, int i);
-internal bool del(MultiGapBuffer *buffer, int caretId);
-internal int posFromId(MultiGapBuffer *buffer, int caretId);
+internal bool del(MultiGapBuffer *buffer, History *history, bool log, int caretId);
 internal void removeCaret(MultiGapBuffer *buffer, int caretId);
 internal void removeEmpty(TextBuffer *textBuffer);
-internal bool mgb_moveLeft(MultiGapBuffer *buffer, int caretId);
-internal bool mgb_moveRight(MultiGapBuffer *buffer, int caretId);
-internal bool ownsIndex(MultiGapBuffer *buffer, DynamicArray_int *ids, int targetIndex);
-internal bool HasCaretAtIterator(MultiGapBuffer*buffer, DynamicArray_int *ids, MGB_Iterator	 iterator);
-internal bool isEmptyCaret(MultiGapBuffer *buffer, DynamicArray_int *ids, int index);
-internal bool removeCharacter(MultiGapBuffer *buffer, int caretId);
+internal bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretId);
+internal bool mgb_moveRight(MultiGapBuffer *buffer, History *history, bool log, int caretId);
+internal bool ownsIndex(MultiGapBuffer *buffer, DA_int *ids, int targetIndex);
+internal bool HasCaretAtIterator(MultiGapBuffer*buffer, DA_int*ids, MGB_Iterator	 iterator);
+internal bool isEmptyCaret(MultiGapBuffer *buffer, DA_int *ids, int index);
+internal bool removeCharacter(MultiGapBuffer *buffer, History *history, bool log, int caretId);
 internal void invDelete(MultiGapBuffer *buffer, int caretId, char character);
 internal void appendCharacter(MultiGapBuffer *buffer, int caretId, char character);
 bool pushValid(MultiGapBuffer *buffer, MGB_Iterator *it);

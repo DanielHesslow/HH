@@ -79,6 +79,8 @@ int data_length_from_opcode(HistoryOpCode op_code)
 		return sizeof(char);
 	case op_move:
 		return sizeof(int);
+	case op_internal_move:
+		return 0; // no data bitch, unary is king.
 	case op_remove_cursor:
 	case op_add_cursor:
 		return sizeof(DataAddRemoveCursor);
@@ -122,7 +124,7 @@ void branch_current_to_end(History *history)
 	if (branch.from != branch.to) //check seems unneccsary no?
 	{
 		set_branch(history,branch.from,0);
-		Add(&history->branches, branch);
+		history->branches.add(branch);
 		history->state.location = branch.to;
 	}
 }
@@ -156,10 +158,10 @@ void append_instruction_raw(History *history, Instruction instruction, void *dat
 		else location->prev_data_index += data_length_from_opcode(instr->op_code);
 		++location->prev_instruction_index;
 	}
-	Add(&history->instructions, instruction);
+	history->instructions.add(instruction);
 	int data_len = data_length_from_opcode(instruction.op_code);
 	for (int i = 0; i < data_len; i++)
-		Add(&history->data, ((uint8_t *)data)[i]);
+		history->data.add(((uint8_t *)data)[i]);
 
 }
 
@@ -179,14 +181,18 @@ void append_instruction(History *history, HistoryOpCode op_code, int cursor_id, 
 	{	//insert caret information into caret 'register'
 		history->state.last_cursor_reg = (history->state.last_cursor_reg + 1) & 7; //this can proably be done in a better way.
 		HCursorInfo old_info = history->state.cursor_reg[history->state.last_cursor_reg];
-		HCursorInfo new_info = {};
-		new_info.cursor_id = cursor_id - old_info.cursor_id;
-		new_info.view_id =  view_id - old_info.view_id;
-		history->state.cursor_reg[history->state.last_cursor_reg] = new_info;
+		HCursorInfo relative = {};
+		relative.cursor_id = cursor_id - old_info.cursor_id;
+		relative.view_id =  view_id - old_info.view_id;
+		HCursorInfo absolute= {};
+		absolute.cursor_id = cursor_id;
+		absolute.view_id = view_id;
+
+		history->state.cursor_reg[history->state.last_cursor_reg] = absolute;
 
 		instruction.cursor_reg_index = history->state.last_cursor_reg;
 		instruction.op_code = op_set_cursor;
-		append_instruction_raw(history, instruction, &new_info);
+		append_instruction_raw(history, instruction, &relative);
 	}
 
 cursor_set:
@@ -240,13 +246,22 @@ void log_move(History *history, int direction, int cursor_id, int view_id)
 	move.cursor_id = cursor_id;
 	move.direction = direction;
 	move.view_id= view_id;
-	Add(&history->waiting_moves, move);
+	history->waiting_moves.add(move);
 }
+
+
+void log_internal_move(History *history, int8_t direction, int cursor_id, int view_id) 	{
+	_log_lazy_moves(history);
+	append_instruction(history, op_internal_move, cursor_id, view_id, direction, NULL);
+
+}
+
 void log_add(History *history, int8_t direction, char byte, int cursor_id, int view_id)
 { 
 	_log_lazy_moves(history);
 	append_instruction(history, op_add, cursor_id, view_id, direction,&byte);
 }
+
 void log_remove(History *history, int direction, char byte, int cursor_id, int view_id)
 {
 	_log_lazy_moves(history);
@@ -526,6 +541,7 @@ bool undo_(BackingBuffer *backingBuffer)
 	MultiGapBuffer *mgb = backingBuffer->buffer;
 	_log_lazy_moves(history);
 	ExpandedInstruction instr;
+
 	bool success = expand_instruction_at(backingBuffer, history->state.location, &instr);
 	if (!success) return false;
 	switch (instr.op_code)
@@ -556,12 +572,17 @@ bool undo_(BackingBuffer *backingBuffer)
 			move_llnc_(instr.textBuffer,dir, instr.cursor_id, false, movemode_byte);
 		break;
 	}
+	case op_internal_move:
+	{
+		int dir = instr.direction > 0 ? -1 : 1;
+		internal_move(mgb,history, dir, instr.cursor_id);
+	}break;
 	case op_remove_cursor:
 	{	
 		DataAddRemoveCursor data = instr.data.add_remove_cursor;
 		AddCaretWithId(mgb, instr.cursor_info->view_id, data.pos, instr.cursor_id);
 		auto DA = data.is_selection ? &instr.textBuffer->ownedSelection_id : &instr.textBuffer->ownedCarets_id;
-		Add(DA, instr.cursor_id);
+		DA->add(instr.cursor_id);
 	}break;
 	case op_add_cursor:
 	{
@@ -569,7 +590,7 @@ bool undo_(BackingBuffer *backingBuffer)
 		DataAddRemoveCursor data = instr.data.add_remove_cursor;
 		removeCaret(mgb, instr.cursor_id);
 		auto DA = data.is_selection ? &instr.textBuffer->ownedSelection_id : &instr.textBuffer->ownedCarets_id;
-		RemoveOrd(DA, instr.cursor_id_index);
+		DA->removeOrd(instr.cursor_id_index);
 
 	}break;
 	}
@@ -617,12 +638,18 @@ bool redo_(BackingBuffer *backingBuffer, int index)
 			move_llnc_(instr.textBuffer, dir, instr.cursor_id, false, movemode_byte);
 		break;
 	}
+	case op_internal_move:
+	{
+		int dir = instr.direction > 0 ? 1 : -1;
+		internal_move(mgb,history, dir,instr.cursor_id);
+		break;
+	}
 	case op_add_cursor:
 	{
 		DataAddRemoveCursor data = instr.data.add_remove_cursor;
 		AddCaretWithId(mgb, instr.cursor_info->view_id, data.pos, instr.cursor_id);
 		auto DA = data.is_selection ? &instr.textBuffer->ownedSelection_id : &instr.textBuffer->ownedCarets_id;
-		Add(DA, instr.cursor_id);
+		DA->add(instr.cursor_id);
 	}break;
 	case op_remove_cursor:
 	{
@@ -630,7 +657,7 @@ bool redo_(BackingBuffer *backingBuffer, int index)
 		DataAddRemoveCursor data = instr.data.add_remove_cursor;
 		removeCaret(mgb, instr.cursor_id);
 		auto DA = data.is_selection ? &instr.textBuffer->ownedSelection_id : &instr.textBuffer->ownedCarets_id;
-		RemoveOrd(DA, instr.cursor_id_index);
+		DA->removeOrd(instr.cursor_id_index);
 
 	}break;
 	}
@@ -686,7 +713,7 @@ void undo(BackingBuffer *backingBuffer)
 		undo_(backingBuffer);
 		if (instruction.textBuffer)
 			markPreferedCaretXDirty(instruction.textBuffer, instruction.cursor_id_index);
-	} while (!waypoint_at(history, history->state.location.prev_instruction_index));
+	}while (!waypoint_at(history, history->state.location.prev_instruction_index));
 }
 
 bool has_branch_from_instruction(History *history, int prev_instruction_index)

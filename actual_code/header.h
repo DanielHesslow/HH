@@ -44,8 +44,11 @@ enum Direction
 	dir_right,
 	dir_left,
 };
+#define DA_TYPE int
+#define DA_NAME DA_int
+#include "DynamicArray.h"
 
-//#include "History.h"
+
 #include "History.h"
 #include "MultiGapBuffer.h"
 
@@ -132,17 +135,21 @@ struct CharBitmap
 	int yOff;
 };
 
-
-
-typedef char16_t *PCHAR16;
-typedef TextBuffer *PTextBuffer;
-
-DEFINE_DynamicArray(identifier)
-
-DEFINE_DynamicArray(ColorChange)
-DEFINE_DynamicArray(CharBitmap)
-DEFINE_DynamicArray(PCHAR16)
-DEFINE_DynamicArray(PTextBuffer)
+#define DA_TYPE identifier
+#define DA_NAME DA_identifier
+#include "DynamicArray.h"
+#define DA_TYPE ColorChange
+#define DA_NAME DA_ColorChange
+#include "DynamicArray.h"
+#define DA_TYPE CharBitmap
+#define DA_NAME DA_CharBitmap
+#include "DynamicArray.h"
+#define DA_TYPE char16_t *
+#define DA_NAME DA_Pchar16
+#include "DynamicArray.h"
+#define DA_TYPE TextBuffer *
+#define DA_NAME DA_PTextBuffer
+#include "DynamicArray.h"
 
 
 
@@ -178,7 +185,10 @@ struct KeyBinding
 	int last_event_peeked;
 };
 
-DEFINE_DynamicArray(KeyBinding);
+#define DA_TYPE KeyBinding
+#define DA_NAME DA_KeyBinding
+#include "DynamicArray.h"
+
 
 enum BufferType
 {
@@ -198,7 +208,10 @@ bool bind_ident_eq(BindingIdentifier a, BindingIdentifier b)
 {
 	return a.id == b.id && a.function == b.function;
 }
-typedef void *PVOID;
+
+unsigned long long silly_hash(long long i) {
+	return (unsigned long long)i * (unsigned long long int)2654435761;
+}
 
 unsigned int silly_bind_ident_hash(BindingIdentifier ident) {
 	return silly_hash(ident.id) * 31 + silly_hash((int)(long long)(ident.function));
@@ -218,11 +231,8 @@ struct HistoryChangeTracker
 	bool move_change;
 };
 
-//DEFINE_HashTable(BindingIdentifier, PVOID, silly_bind_ident_hash, bind_ident_eq)
-//DEFINE_HashTable(PVOID, HistoryChangeTracker, silly_hash_void_ptr, ptr_eq)
-
-#define HT_ALLOC(num_bytes) Allocate(*allocator, num_bytes, "multi gap buffer");
-#define HT_FREE(ptr,num_bytes) DeAllocate(*allocator, ptr);
+#define HT_ALLOC(num_bytes) allocator->alloc(num_bytes).mem;
+#define HT_FREE(ptr,num_bytes) allocator->free(ptr,num_bytes);
 #define HT_ALLOCATOR DH_Allocator *
 
 // @LEAK @CLEANUP use allocator!
@@ -242,20 +252,20 @@ struct HistoryChangeTracker
 struct CommonBuffer
 {
 	HashTable_BindingIdentifier_PVOID bindingMemory;
-	DH_Allocator allocator;
+	DH_SlowTrackingArena *allocator;
 };
 
 struct BackingBuffer
 {
 	CommonBuffer commonBuffer;
-	DH_Allocator allocator;
+	DH_SlowTrackingArena *allocator;
 	MultiGapBuffer *buffer;
 	History history;
-	DynamicArray_int lineSumTree;
+	DA_int lineSumTree;
 	int lines;
 	HashTable_PVOID_HistoryChangeTracker binding_next_change;
-	DynamicArray_PTextBuffer textBuffers;
-	DHSTR_String path; 
+	DA_PTextBuffer textBuffers;
+	String path; 
 };
 
 
@@ -265,9 +275,9 @@ struct CursorInfo
 	bool is_dirty;
 };
 
-DEFINE_DynamicArray(CursorInfo);
-
-
+#define DA_TYPE CursorInfo
+#define DA_NAME DA_CursorInfo
+#include "DynamicArray.h"
 
 int sillyhash_char(char c)
 {
@@ -287,16 +297,10 @@ internal inline bool int_eq(int a, int b)
 	return a == b;
 }
 
-//DEFINE_HashTable(ulli, CharBitmap, silly_hash_lli, lli_eq);
-//DEFINE_HashTable(char32_t, int, silly_hash_char32_t, int_eq);
-
-
-
-// NOTE ALLOCATOR IS WRONG NOW. we will leak :/ @LEAK @CLEANUP
 #define HT_NAME HashTable_ulli_CharBitmap
 #define HT_KEY unsigned long long
 #define HT_VALUE CharBitmap
-#define HT_HASH(x) silly_hash_lli(x);
+#define HT_HASH(x) silly_hash(x);
 #include "L:\HashTable.h"
 
 #define HT_NAME HashTable_char32_t_int
@@ -365,29 +369,17 @@ struct CharRenderingChange
 	bool start;
 };
 
-inline int cmp_int(int a, int b)
-{
-	return (a > b) - (a < b); //+1,-1, 0 are possible return values
-}
-
-inline int cmp_Location(void *v_a, void *v_b)
-{
-	Location a = *(Location *)v_a;
-	Location b = *(Location *)v_b;
-	return cmp_int(a.line, b.line) * 2 + cmp_int(a.column, b.column);
-
-}
-#define DHMA_OFFSET_OF(s, value)((size_t)&(((s*) 0)->value))
-inline int cmpCharRenderingChange(void *a, void*b)
-{
-	return cmp_Location((char *)a + DHMA_OFFSET_OF(CharRenderingChange, location), (char *)b + DHMA_OFFSET_OF(CharRenderingChange, location));
-}
-DEFINE_Complete_ORD_DynamicArray(CharRenderingChange, cmpCharRenderingChange);
 
 
+#define DA_NAME ORD_DA_CharRenderingChange
+#define DA_TYPE CharRenderingChange
+#define DA_ORDER(a,b) a.location.line < b.location.line || (a.location.line == b.location.line && a.location.column < b.location.column)
+#include "DynamicArray.h"
 
+#define DA_NAME DA_ContextCharWidthHook
+#define DA_TYPE ContextCharWidthHook
+#include "DynamicArray.h"
 
-DEFINE_DynamicArray(ContextCharWidthHook);
 
 
 struct CharRenderingInfo
@@ -403,26 +395,30 @@ struct CharRenderingInfo
 
 
 typedef void(*RenderingModifier)(TextBuffer *textBuffer);
-DEFINE_DynamicArray(RenderingModifier);
+#define DA_NAME DA_RenderingModifier
+#define DA_TYPE RenderingModifier
+#include "DynamicArray.h"
+
+
 struct TextBuffer
 {
 	CommonBuffer commonBuffer;
 	BufferType bufferType;
 	BackingBuffer *backingBuffer;
-	DynamicArray_RenderingModifier renderingModifiers;
+	DA_RenderingModifier renderingModifiers;
 
-	DynamicArray_KeyBinding KeyBindings;
+	DA_KeyBinding KeyBindings;
 
 	int lines;
 
-	DHSTR_String fileName;
+	String fileName;
 
-	DynamicArray_int ownedCarets_id;
-	DynamicArray_int ownedSelection_id;
-	DynamicArray_CursorInfo cursorInfo;
-	DynamicArray_ContextCharWidthHook contextCharWidthHook;
-	ORD_DynamicArray_CharRenderingChange rendering_changes;
-	DH_Allocator allocator;
+	DA_int ownedCarets_id;
+	DA_int ownedSelection_id;
+	DA_CursorInfo cursorInfo;
+	DA_ContextCharWidthHook contextCharWidthHook;
+	ORD_DA_CharRenderingChange rendering_changes;
+	DH_SlowTrackingArena *allocator;
 	CharRenderingInfo initial_rendering_state;
 	int textBuffer_id;
 	//reg_buffer specific renderthings. need to be here becuase no matter the view we're in we need to keep our info consitant
@@ -449,27 +445,29 @@ bool ownsCaret(TextBuffer *buffer, int index)
 }
 
 
-DEFINE_DynamicArray(TextBuffer);
+
 
 struct MenuItem
 {
-	DHSTR_String name;
+	String name;
 	void *data;
 };
 
-DEFINE_DynamicArray(MenuItem);
+#define DA_NAME DA_MenuItem
+#define DA_TYPE MenuItem
+#include "DynamicArray.h"
 
 struct Menu
 {
-	DynamicArray_MenuItem items;
+	DA_MenuItem items;
 	int active_item;
-	DH_Allocator allocator; //free on close
+	DH_SlowTrackingArena *allocator; //free on close
 };
 
 struct Data
 {
 	TextBuffer *commandLine;
-	DynamicArray_PTextBuffer textBuffers;
+	DA_PTextBuffer textBuffers;
 	int activeTextBufferIndex;
 	bool isCommandlineActive;
 	bool updateAllBuffers;
@@ -505,7 +503,7 @@ internal void       appendCharacter(TextBuffer *textBuffer, char character, int 
 internal void		removeCharacter(TextBuffer *textBuffer, bool log = true);
 internal bool       removeCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log = true);
 internal void		unDeleteCharacter(TextBuffer *textBuffer, char character, int caretIdIndex, bool log=true);
-internal void markPreferedCaretXDirty(TextBuffer *textBuffer, int caretIdIndex);
+internal void		markPreferedCaretXDirty(TextBuffer *textBuffer, int caretIdIndex);
 
 
 internal bool 		deleteCharacter(TextBuffer *textBuffer, int caretId,bool log = true);
@@ -518,7 +516,7 @@ internal void		renderRectFullColor(Bitmap bitmap, int xOffset, int yOffset, int 
 internal bool		isWordDelimiter(char i);
 internal bool		isFuncDelimiter(char i);
 internal void		initTextBuffer(TextBuffer *textBuffer);
-internal char *getRestAsString(MultiGapBuffer *buffer, MGB_Iterator it);
+internal char *getRestAsString(MultiGapBuffer *buffer, MGB_Iterator it, DH_Allocator * allocator);
 internal void		CloseCommandLine(Data *data);
 void setNoSelection(TextBuffer *textBuffer, log_ log);
 internal void removeSelection(TextBuffer *textBuffer);
@@ -529,10 +527,11 @@ internal void gotoStartOfLine(TextBuffer *textBuffer, int line, select_ selectio
 internal bool validSelection(TextBuffer *buffer);
 internal void moveWhile(TextBuffer *textBuffer, select_ selection, log_ log, bool setPrefX, Direction dir, bool(*func)(char, int *));
 internal bool whileSameLine(char character, int *state);
-internal void move(TextBuffer *textBuffer, Direction dir, log_ log, select_ selection);
-internal bool move(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection);
-internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex, bool up);
+//internal void move(TextBuffer *textBuffer, Direction dir, log_ log, select_ selection);
+//internal bool move(TextBuffer *textBuffer, Direction dir, int caretIdIndex, log_ log, select_ selection);
+//internal void moveV_nc(TextBuffer *textBuffer, select_ selection, int caretIdIndex, bool up);
 internal int getLineStart(BackingBuffer *backingBuffer, int line);
+void removeOwnedEmptyCarets(TextBuffer *textBuffer);
 
 void removeCaret(TextBuffer *buffer, int caretIdIndex, bool log);
 void AddCaret(TextBuffer *buffer, int pos);
@@ -559,25 +558,36 @@ internal void paste(TextBuffer *buffer);
 
 struct AvailableFont
 {
-	DHSTR_String name;
-	DHSTR_String path;
+	String name;
+	String path;
 };
+#if 0
 int cmp_font(void *va, void *vb)
 {
-	DHSTR_String a = ((AvailableFont *)va)->name;
-	DHSTR_String b = ((AvailableFont *)vb)->name;
+	String a = ((AvailableFont *)va)->name;
+	String b = ((AvailableFont *)vb)->name;
 	return DHSTR_cmp(a, b, string_cmp_longer_bigger);
 }
-DEFINE_Complete_ORD_DynamicArray(AvailableFont,cmp_font);
+#endif
+
+#define DA_TYPE AvailableFont
+#define DA_NAME DA_ORD_AvailableFont
+//#define DA_ORDER(a,b) (DHSTR_cmp(a.name,b.name,string_cmp_longer_bigger) < 0)    //@CLEANUP ???
+#include "DynamicArray.h"
+
 struct AvailableTypeface
 {
 	AvailableFont *members;
 	int member_len;
 	char *typefaceName;
 };
-DEFINE_DynamicArray(AvailableTypeface);
-DynamicArray_AvailableTypeface availableTypefaces = DHDS_constructDA(AvailableTypeface, 250, default_allocator);
-static ORD_DynamicArray_AvailableFont availableFonts = DHDS_ORD_constructDA(AvailableFont, 500, default_allocator);
+
+#define DA_NAME DA_AvailableTypeface
+#define DA_TYPE AvailableTypeface
+#include "DynamicArray.h"
+
+DA_AvailableTypeface availableTypefaces = DA_AvailableTypeface::make(general_allocator);
+static DA_ORD_AvailableFont availableFonts = DA_ORD_AvailableFont::make(general_allocator);
 
 
 // this is a 'generic' view of a buffer with all the data the Lexer needs

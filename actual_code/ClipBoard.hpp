@@ -1,49 +1,32 @@
 
 
-struct ClipboardItem
-{
-	char16_t *string;
+struct ClipboardItem {
+	String string;
 	bool onSeperateLine;
 };
 
-DEFINE_DynamicArray(ClipboardItem);
-struct InternalClipboard
-{
-	DynamicArray_ClipboardItem clips;
+#define DA_TYPE ClipboardItem
+#define DA_NAME DA_ClipboardItem
+#include "DynamicArray.h"
+struct InternalClipboard {
+	DA_ClipboardItem clips;
 };
 
 
-internal char16_t *getAsUnicode(InternalClipboard *board)
-{
-	if (board->clips.length == 0) return 0;
-	char16_t *ack = strcpy(board->clips.start[0].string);
-	for (int i = 1; i < board->clips.length;i++)
-	{
-		{
-			char16_t *old = ack;
-			ack = mergeStrings(old, board->clips.start[i].string);
-			free_(old);
-		}
-	
-		{
-			char16_t *old = ack;
-			ack = mergeStrings(ack, (char16_t *)u"\n"); //slow af
-			free_(old);
-		}
+internal String string_from_clipboard(InternalClipboard *board) {
+	if (board->clips.length == 0) return String::make("");
+
+	char *ack = MemStack_GetTop();
+	int len = 0;
+	for (int i = 0; i < board->clips.length; i++) {
+		String str = board->clips[i].string;
+		memcpy(&ack[len], str.start, str.length);
+		len += str.length;
+		ack[len++] = '\n';
 	}
-
-	return ack;
+	return String::make(ack, len, general_allocator);
 }
 
-internal char *getAsAscii(InternalClipboard *board)
-{
-	if (board->clips.length == 0) return 0;
-	char16_t *asUnicode= getAsUnicode(board);
-	
-	char *asAscii = createcharFromchar16_t(asUnicode);
-	free_(asUnicode);
-	return asAscii;
-}
 
 
 // serialization / deserialization things
@@ -51,21 +34,21 @@ internal char *getAsAscii(InternalClipboard *board)
 // consider using memcpy insead of pop a bunch of times 
 // if this ever gets somewhat slow.
 
-DEFINE_DynamicArray(char);
-DEFINE_DynamicArray(char16_t);
 
-void *reserveByte(DynamicArray_char *buffer, size_t bytes)
-{
-	void *start = &buffer->start[buffer->length];
-	for (int i = 0; i < bytes; i++)
-	{
-		Add(buffer, 0);
+#define DA_TYPE char
+#define DA_NAME DA_char
+#include "DynamicArray.h"
+
+
+
+void *reserveByte(DA_char *buffer, size_t bytes) {
+	for (int i = 0; i < bytes; i++) {
+		buffer->add(0);
 	}
-	return start;
+	return &buffer->start[buffer->length - bytes];
 }
 
-void *getBytes(char **buffer, size_t bytes)
-{
+void *getBytes(char **buffer, size_t bytes) {
 	void *ret = *buffer;
 	*buffer += bytes;
 	return ret;
@@ -74,77 +57,66 @@ void *getBytes(char **buffer, size_t bytes)
 #define pop(buffer,type) ((type *)getBytes(buffer, sizeof(type)))
 #define push(buffer,type) ((type *)reserveByte(buffer, sizeof(type)))
 
-void serialize(DynamicArray_char *buffer, ClipboardItem item)
-{
-	*push(buffer, int16_t) = DHSTR_strlen(item.string);
+void serialize(DA_char *buffer, ClipboardItem item) {
+	assert(item.string.length < INT16_MAX);
+	*push(buffer, int16_t) = item.string.length;
 	*push(buffer, bool) = item.onSeperateLine;
 
-	char16_t *p = item.string;
-	while (*p)
-	{
-		*push(buffer, char16_t) =*p++;
+	char *p = item.string;
+	while (*p) {
+		*push(buffer, char) = *p++;
 	}
 }
 
-void serialize(DynamicArray_char *buffer, InternalClipboard board)
-{
+void serialize(DA_char *buffer, InternalClipboard board) {
+	assert(board.clips.length < INT16_MAX);
 	*push(buffer, int16_t) = board.clips.length;
 
-	for (int i = 0; i < board.clips.length;i++)
-	{
+	for (int i = 0; i < board.clips.length; i++) {
 		serialize(buffer, board.clips.start[i]);
 	}
 }
 
-ClipboardItem deSerialize_ClipboardItem(char **buffer)
-{
+ClipboardItem deSerialize_ClipboardItem(char **buffer) {
 	ClipboardItem ret = {};
 
 	int16_t length = *pop(buffer, int16_t);;
 	ret.onSeperateLine = *pop(buffer, bool);
-	ret.string= ((char16_t *)alloc_(sizeof(char16_t)*length+1,"desierialized clipboard string"));
-	for (int i = 0; i < length; i++)
-	{
-		ret.string[i] = *pop(buffer, char16_t);
-	}
-	ret.string[length] = 0;
+	ret.string = { (char *)getBytes(buffer,length), length };
+	ret.string = ret.string.copy(general_allocator);
 	return ret;
 }
 
-InternalClipboard deSerialize_InternalClipboard(char **buffer)
-{
+InternalClipboard deSerialize_InternalClipboard(char **buffer) {
 	InternalClipboard ret = {};
 	int16_t length = *pop(buffer, int16_t);
-	ret.clips = constructDynamicArray_ClipboardItem(length*2, "desierializing some clipboard.");
-	ret.clips.length = length;
-	for (int i = 0; i < length; i++)
-	{
-		ret.clips.start[i] = deSerialize_ClipboardItem(buffer);
+	ret.clips = DA_ClipboardItem::make(general_allocator);
+	ret.clips.reserve(length);
+	for (int i = 0; i < length; i++) {
+		ret.clips.add(deSerialize_ClipboardItem(buffer));
 	}
 	return ret;
 }
-internal char16_t *getLineAsString(TextBuffer *buffer, int caretIdIndex)
-{
+internal String getLineAsString(TextBuffer *buffer, int caretIdIndex) {
 	MultiGapBuffer *mg_buffer = buffer->backingBuffer->buffer;
 	MGB_Iterator it = iteratorFromLine(buffer->backingBuffer, getLineFromCaret(buffer->backingBuffer, buffer->ownedCarets_id.start[caretIdIndex]));
-	DynamicArray_char16_t dynamicString = constructDynamicArray_char16_t(50, "getLineAsString");
-	for (;;)
-	{
-		char16_t currentCharacter = *getCharacter(mg_buffer, it);
-		Add(&dynamicString, currentCharacter);
+	DA_char dynamicString = DA_char::make(general_allocator);
+	for (;;) {
+		char currentCharacter = *getCharacter(mg_buffer, it);
+		dynamicString.add(currentCharacter);
 		bool success = getNext(mg_buffer, &it);
-		if (!success || isLineBreak(currentCharacter))
-		{
-			dynamicString.start[dynamicString.length - 1] = 0;
+		if (!success || isLineBreak(currentCharacter)) {
 			break;
 		}
 	}
-	return dynamicString.start;
+	String str = { dynamicString.start,dynamicString.length - 1 }; // to strip the linebreak. 
+	str = str.copy(general_allocator); // note this is neccessary to be able to free the string since we loose the capacity from the da
+	dynamicString.destroy();
+	return str;
 }
 
 
-internal char16_t *getSelectionOrRowAsString(TextBuffer *buffer, int caretIdIndex, bool *isRow)
-{
+internal String getSelectionOrRowAsString(TextBuffer *buffer, int caretIdIndex, bool *isRow) {
 	MultiGapBuffer *mg_buffer = buffer->backingBuffer->buffer;
 	int selPos = getCaretPos(mg_buffer, buffer->ownedSelection_id.start[caretIdIndex]);
 	int carPos = getCaretPos(mg_buffer, buffer->ownedCarets_id.start[caretIdIndex]);
@@ -153,73 +125,61 @@ internal char16_t *getSelectionOrRowAsString(TextBuffer *buffer, int caretIdInde
 
 	if (isRow)*isRow = length == 0;
 
-	if (length == 0)
-	{
+	if (length == 0) {
 		return getLineAsString(buffer, caretIdIndex);
-	}
-	else
-	{
-		char16_t *ret = (char16_t *)alloc_(sizeof(char16_t) * (length + 1), "selection as string, tmp");
-		for (int i = 0; i < length; i++)
-		{
+	} else {
+		char *ret = (char*)general_allocator->alloc(sizeof(char) * (length + 1)).mem; // @CLEANUP ALLOCATION
+		for (int i = 0; i < length; i++) {
 			ret[i] = *getCharacter(mg_buffer, it);
 			getNext(mg_buffer, &it);
 		}
 		ret[length] = 0;
 
-		return ret;
+		return{ ret,length };
 	}
 }
 
 
 internal void win32_StoreInClipboard(InternalClipboard *clipboard);
-internal void copy(TextBuffer *textBuffer)
-{
+internal void copy(TextBuffer *textBuffer) {
 	InternalClipboard board = {};
-	board.clips = constructDynamicArray_ClipboardItem(textBuffer->ownedCarets_id.length, "clipbuffer clips");
-	board.clips.length = textBuffer->ownedCarets_id.length;
-	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
-	{
+	board.clips = DA_ClipboardItem::make(general_allocator);
+	board.clips.reserve(textBuffer->ownedCarets_id.length);
+	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++) {
 		bool isRow;
-		board.clips.start[i].string = getSelectionOrRowAsString(textBuffer,i,&isRow);
-		board.clips.start[i].onSeperateLine = isRow;
+		ClipboardItem item;
+		item.string = getSelectionOrRowAsString(textBuffer, i, &isRow);
+		item.onSeperateLine = isRow;
+		board.clips.add(item);
 	}
 	win32_StoreInClipboard(&board);
-	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++)
-	{
-		free_(board.clips.start[i].string);
+	for (int i = 0; i < textBuffer->ownedCarets_id.length; i++) {
+		board.clips.start[i].string.destroy(general_allocator);
 	}
-	free_(board.clips.start);
+	board.clips.destroy();
 }
 
 internal InternalClipboard win32_LoadFromClipboard();
 
-internal void paste(TextBuffer *textBuffer)
-{
+internal void paste(TextBuffer *textBuffer) {
 	//insert_event_marker(&textBuffer->backingBuffer->history, history_mark_start); 
 
 	InternalClipboard board = win32_LoadFromClipboard();
-	if (board.clips.start)
-	{
-		for (int i = board.clips.length-1; i >= 0; i--)
-		{
+	if (board.clips.start) {
+		for (int i = board.clips.length - 1; i >= 0; i--) {
 			ClipboardItem item = board.clips.start[i];
-			if (item.onSeperateLine)
-			{
+			if (item.onSeperateLine) {
 				gotoStartOfLine(textBuffer, getLineFromCaret(textBuffer->backingBuffer, textBuffer->ownedCarets_id.start[i]), no_select, i);
 			}
 
-			int length = DHSTR_strlen(item.string);
-			
-			for (int j = 0; j < length; j++)
-			{
-				appendCharacter(textBuffer, item.string[j], i % textBuffer->ownedCarets_id.length,true);
+			for (int j = 0; j < item.string.length; j++) {
+				appendCharacter(textBuffer, item.string[j], i % textBuffer->ownedCarets_id.length, true);
 			}
-			if (i / textBuffer->ownedCarets_id.length>0||item.onSeperateLine)
-			{
-				appendCharacter(textBuffer, '\n', i % textBuffer->ownedCarets_id.length,true);
+
+			if (i / textBuffer->ownedCarets_id.length > 0 || item.onSeperateLine) {
+				appendCharacter(textBuffer, '\n', i % textBuffer->ownedCarets_id.length, true);
 			}
-			free_(board.clips.start[i].string);
+			board.clips.start[i].string.destroy(general_allocator);
 		}
 	}
 
@@ -227,17 +187,23 @@ internal void paste(TextBuffer *textBuffer)
 	//insert_event_marker(&textBuffer->backingBuffer->history, history_mark_end); 
 }
 
-internal void cut(TextBuffer *textBuffer)
-{
-	//copy is normalizeing as well...
+internal void cut(TextBuffer *textBuffer) {
 	copy(textBuffer);
-	if (!validSelection(textBuffer))
-	{
-		moveWhile(textBuffer, no_select, do_log, true, dir_left, whileSameLine);
-		moveWhile(textBuffer, do_select,  do_log, true, dir_right, whileSameLine);
-		move(textBuffer, dir_right, do_log, do_select);
+	if (!validSelection(textBuffer)) {
+		//this fucks us up
+		for (int i = 0; i < textBuffer->ownedCarets_id.length; i++) {
+			char c;
+			while ((c = *get(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id[i], dir_left)) && c != '\n') {
+				if (!removeCharacter(textBuffer, i, true))break;
+			}
+			while ((c = *get(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id[i], dir_right)) && c != '\n') {
+				if (!deleteCharacter(textBuffer, i, true))break;
+			}
+			deleteCharacter(textBuffer, i, true);
+		}
+	} else {
+		removeSelection(textBuffer);
 	}
-	removeSelection(textBuffer); //remove row.
 }
 
 

@@ -99,13 +99,6 @@ MGB_Iterator getIterator(MultiGapBuffer *buffer, int pos)
 	return it;
 }
 
-
-char *get(MultiGapBuffer *buffer, int pos)
-{
-	MGB_Iterator it = getIterator(buffer, pos);
-	return &buffer->start[buffer->blocks.start[it.block_index].start + it.sub_index];
-}
-	
 int getIteratorPos(MultiGapBuffer *buffer, MGB_Iterator it)
 {
 	int ack = 0;
@@ -239,39 +232,30 @@ char *getCharacter(MultiGapBuffer *buffer, MGB_Iterator it)
 	char *ret= &buffer->start[block.start+it.sub_index];
 	return ret;
 }
-	
+
 char *get(MultiGapBuffer *buffer, int caretId, Direction dir)
 {
-	// this might get garbage on either side of the buffer
-	// not doing checks for this *might* be beneficial. We'll see.
-	
-	//hrm investigate what the fuck we meant... That didn't seam to good now did it?
-	int caretIndex = indexFromId(buffer,caretId);
-	if (dir == dir_left)
-	{
-		return end(buffer, buffer->blocks.start[caretIndex]);
-	}
-	else
-	{
-		return start(buffer, buffer->blocks.start[caretIndex + 1]);
-	}
+	int caretIndex = indexFromId(buffer, caretId);
+	MGB_Iterator it = { caretIndex+1,0 };
+	if (dir == dir_left) MoveIterator(buffer, &it, -1);
+	if (!pushValid(buffer, &it)) return &invalid;
+	return getCharacter(buffer, it);
 }
 
-MultiGapBuffer createMultiGapBuffer(int size,DH_Allocator allocator)
+MultiGapBuffer createMultiGapBuffer(int size, DH_Allocator *allocator)
 {
-	DH_Allocator macro_used_allocator = allocator;
 	MultiGapBuffer buffer = {};
 	buffer.allocator = allocator;
-	buffer.blocks = constructDynamicArray_BufferBlock(5,"multiGapBuffer blocks",allocator);
-	buffer.start = (char *)ALLOC(allocator,size*sizeof(char));
+	buffer.blocks = DA_BufferBlock::make(allocator);
+	buffer.block = allocator->alloc(size*sizeof(char));
 	buffer.capacity = size;
 	buffer.running_cursor_id = 994; // just some non-0 number to catch some bad bugs.
 	BufferBlock first = {0,0};
 	BufferBlock last = {size,0};
-	Add(&buffer.blocks,first);
-	Add(&buffer.blocks,last);
-	buffer.cursor_ids = constructDynamicArray_CursorIdentifier(20,"mutliGapBuffer cursors",allocator);
-	Add(&buffer.cursor_ids, { 0,buffer.running_cursor_id});
+	buffer.blocks.add(first);
+	buffer.blocks.add(last);
+	buffer.cursor_ids = DA_CursorIdentifier::make(allocator);
+	buffer.cursor_ids.add({ 0,buffer.running_cursor_id });
 	return buffer;
 }
 
@@ -319,20 +303,19 @@ void growTo(MultiGapBuffer *buffer, uint64_t size)
 {
 	int multiple = 2;
 	while (buffer->capacity*multiple < size)multiple *= 2;
-	char *new_mem = (char *)ALLOC(buffer->allocator,buffer->capacity * multiple * sizeof(char));
-	buffer->capacity *= multiple;
-	float gap = (buffer->capacity - length(buffer)) / ((float)buffer->blocks.length - 1);
+	MemBlock new_block = buffer->allocator->alloc(buffer->capacity * multiple * sizeof(char));
+	float gap = (new_block.cap- length(buffer)) / ((float)buffer->blocks.length - 1);
 	float ack = 0;
 
 	for (int i = 0; i < buffer->blocks.length; i++)
 	{
 		BufferBlock block = buffer->blocks.start[i];
-		memmove(&new_mem[(int)ack], &buffer->start[block.start], block.length*sizeof(char));
+		memmove(&((char *)new_block.mem)[(int)ack], &buffer->start[block.start], block.length*sizeof(char));
 		buffer->blocks.start[i].start = (int)ack;
 		ack += gap + buffer->blocks.start[i].length;
 	}
-	DeAllocate(buffer->allocator,buffer->start);
-	buffer->start = new_mem;
+	buffer->allocator->free(&buffer->block);
+	buffer->block= new_block;
 }
 
 void grow(MultiGapBuffer *buffer)
@@ -341,9 +324,9 @@ void grow(MultiGapBuffer *buffer)
 }
 
 void maybeGrow(MultiGapBuffer *buffer)
-{//@not in action yet for obvious reasons.
-	float effectivity = ((float)length(buffer) / (float)buffer->capacity);
-	if (effectivity > 0.5)
+{
+	float load_factor = ((float)length(buffer) / (float)buffer->capacity);
+	if (load_factor > 0.5)
 	{
 		grow(buffer);
 	}
@@ -352,6 +335,17 @@ void maybeGrow(MultiGapBuffer *buffer)
 		rebalance(buffer, 0, 0);
 	}
 }
+inline void internal_move_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index, bool log) {
+	if(log)log_internal_move(history, dir, mgb->cursor_ids[cursor_index].id, mgb->cursor_ids[cursor_index].textBuffer_index);
+	DHMA_SWAP(CursorIdentifier,mgb->cursor_ids[cursor_index], mgb->cursor_ids[cursor_index + dir]);
+}
+
+inline void internal_move(MultiGapBuffer *mgb, History *history, int dir, int cursor_id) {
+	int cursor_index = indexFromId(mgb, cursor_id);
+	internal_move_index(mgb, history, dir, cursor_index, false);
+}
+
+
 
 
 //this is neccessary beacuse zero length cursors need to be in a deterministic order for undo's, redos to work 
@@ -359,11 +353,24 @@ void maybeGrow(MultiGapBuffer *buffer)
 //the other may be at the start or at the end, |'asdasda', 'asdasda'|, both valid, for the other cursor.
 //therefor we always keep them sorted on id when they're in the same place, 
 //another (probably more complicated) alternative is to log in history zero lenght moves accross other cursors. but that seams silly. 
+
+// sures seemed silly.. however, it does work. which you you know, is better than can be said about the above...
+
 void order_mgb(MultiGapBuffer *buffer)
 {
-	int N = buffer->cursor_ids.length-1;
-	//bubble sort should be fast enough here, we'll likely do 0 swaps. but you know.
-	// PERFORMANCE..
+#if 0
+	int N = buffer->cursor_ids.length - 1;
+#if 0
+	//debug shit.
+	int ack=0;
+	for (int i = 0; i < N; i++) {
+		Gap gap = getGap(buffer, i);
+		if (gap.next->length == 0) ++ack;
+	}
+	dpr(ack);
+#endif
+	
+	//bubble sort isch actually fast enough here though we could improve it we'll likely do 0 swaps and will only swap a max of number of cursors at the same pos. Which is super low. 
 	for (int n = 0; n < N; n++)
 	{
 		bool swap = false;
@@ -381,6 +388,7 @@ void order_mgb(MultiGapBuffer *buffer)
 		}
 		if (!swap)break;
 	}
+#endif
 }
 
 
@@ -395,7 +403,7 @@ int AddCaret_(MultiGapBuffer *buffer, int pos)
 	new_block.start = old_block->start + it.sub_index;
 	new_block.length = old_block->length - it.sub_index;
 	old_block->length = it.sub_index;
-	Insert(&buffer->blocks, new_block, it.block_index + 1);
+	buffer->blocks.insert(new_block, it.block_index + 1);
 	return it.block_index + 1;
 }
 
@@ -405,7 +413,7 @@ void AddCaretWithId(MultiGapBuffer *buffer, int textBuffer_index, int pos, int I
 	{
 		assert(buffer->cursor_ids.start[i].id != Id);
 	}
-	Insert(&buffer->cursor_ids, { textBuffer_index, Id}, AddCaret_(buffer, pos) - 1);
+	buffer->cursor_ids.insert({ textBuffer_index, Id}, AddCaret_(buffer, pos) - 1);
 	order_mgb(buffer);
 }
 
@@ -414,12 +422,12 @@ int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
 	int index;
 	if (buffer->running_cursor_id == 994) // the first index is implicit. which is not great but it does simplyfy things
 	{
-		index = 0;
+		buffer->cursor_ids[0].textBuffer_index = textBuffer_index;
 	}
 	else
 	{
 		index = AddCaret_(buffer, pos);
-		Insert(&buffer->cursor_ids, { textBuffer_index, buffer->running_cursor_id }, index - 1);
+		buffer->cursor_ids.insert({ textBuffer_index, buffer->running_cursor_id }, index - 1);
 	}
 	order_mgb(buffer);
 	return buffer->running_cursor_id++;
@@ -468,7 +476,7 @@ void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 
 
 
-bool removeCharacter(MultiGapBuffer *buffer, int caretId)
+bool removeCharacter(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 {
 	for (;;)
 	{
@@ -487,12 +495,12 @@ bool removeCharacter(MultiGapBuffer *buffer, int caretId)
 				order_mgb(buffer);
 				return false;
 			}
-			DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[caretIndex], buffer->cursor_ids.start[caretIndex - 1]);
+			internal_move_index(buffer, history, -1, caretIndex, log);
 		}
 	}
 }
 
-bool del(MultiGapBuffer *buffer, int caretId)
+bool del(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 {
 	for (;;)
 	{
@@ -512,15 +520,9 @@ bool del(MultiGapBuffer *buffer, int caretId)
 				order_mgb(buffer);
 				return false;
 			}
-			DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[caretIndex], buffer->cursor_ids.start[caretIndex + 1]);
+			internal_move_index(buffer,history, 1, caretIndex, log);
 		}
 	}
-}
-
-int posFromId(MultiGapBuffer *buffer, int caretId)
-{
-	char *tmp = get(buffer, caretId, dir_left);
-	return get(buffer, tmp);
 }
 
 
@@ -541,11 +543,11 @@ void removeCaret(MultiGapBuffer *buffer, int caretId)
 			moveBlock(buffer, prev, -delta);
 		prev->length += next->length;
 	}
-	RemoveOrd(&buffer->blocks, caretIndex + 1);
-	RemoveOrd(&buffer->cursor_ids, caretIndex);
+	buffer->blocks.removeOrd(caretIndex + 1);
+	buffer->cursor_ids.removeOrd(caretIndex);
 }
 
-bool ownsIndex(MultiGapBuffer *buffer, DynamicArray_int *ids, int targetIndex)
+bool ownsIndex(MultiGapBuffer *buffer, DA_int *ids, int targetIndex)
 {
 	for (int i = 0; i < ids->length; i++)
 	{
@@ -557,7 +559,7 @@ bool ownsIndex(MultiGapBuffer *buffer, DynamicArray_int *ids, int targetIndex)
 	return false;
 }
 
-bool HasCaretAtIterator(MultiGapBuffer*buffer, DynamicArray_int *ids, MGB_Iterator it) 
+bool HasCaretAtIterator(MultiGapBuffer*buffer, DA_int *ids, MGB_Iterator it)
 {
 	if (it.sub_index != 0) return false;
 	if (ownsIndex(buffer, ids, it.block_index-1)) return true;
@@ -589,7 +591,7 @@ bool HasCaretAtIterator(MultiGapBuffer*buffer, DynamicArray_int *ids, MGB_Iterat
 	return false;
 }
 
-bool isEmptyCaret(MultiGapBuffer *buffer, DynamicArray_int *ids, int index)
+bool isEmptyCaret(MultiGapBuffer *buffer, DA_int *ids, int index)
 {//only forwards (just a helper for the function blow. should probably not be reused. needs testing.
 	for (int i = 1;;i++)
 	{
@@ -634,7 +636,7 @@ void CheckOverlapp(MultiGapBuffer *buffer)
 #endif
 }
 
-bool mgb_moveLeft(MultiGapBuffer *buffer, int caretId)
+bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
 	assert(caretIndex >= 0 && caretIndex <= buffer->blocks.length - 2);
@@ -646,9 +648,9 @@ bool mgb_moveLeft(MultiGapBuffer *buffer, int caretId)
 	
 	if (!p->length)
 	{
-		DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[caretIndex], buffer->cursor_ids.start[caretIndex - 1]);
+		internal_move_index(buffer,history,-1,caretIndex,log);
 		CheckOverlapp(buffer);
-		return mgb_moveLeft(buffer,caretId);
+		return mgb_moveLeft(buffer,history,log,caretId);
 	}
 	
 	++n->length;
@@ -660,7 +662,7 @@ bool mgb_moveLeft(MultiGapBuffer *buffer, int caretId)
 	return true;
 }
 
-bool mgb_moveRight(MultiGapBuffer *buffer, int caretId)
+bool mgb_moveRight(MultiGapBuffer *buffer, History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
 	assert(caretIndex >= 0 && caretIndex <= buffer->blocks.length - 2);
@@ -672,9 +674,9 @@ bool mgb_moveRight(MultiGapBuffer *buffer, int caretId)
 
 	if (n->length == 0)
 	{
-		DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[caretIndex], buffer->cursor_ids.start[caretIndex + 1]);
+		internal_move_index(buffer, history, 1, caretIndex,log);
 		CheckOverlapp(buffer);
-		return mgb_moveRight(buffer, caretId);
+		return mgb_moveRight(buffer,history, log,caretId);
 	}
 
 	++p->length;

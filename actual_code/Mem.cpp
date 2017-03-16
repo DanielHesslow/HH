@@ -305,8 +305,8 @@ MemBlock DH_PlatformAllocator::alloc(size_t num_bytes) {
 //Slow Arena ALLOCATOR 
 // mostly a placeholder until I add a propper one!
 #include "windows.h"
-DH_SlowArena::DH_SlowArena(DH_Allocator *allocator) :
-	allocations(allocator) {
+DH_SlowArena::DH_SlowArena(DH_Allocator *allocator) {
+	allocations = DA_ORD_MemBlock::make(allocator);
 	parent = allocator;
 }
 
@@ -335,15 +335,15 @@ void DH_SlowArena::free_all() {
 
 // --- tracking arena
 
-DH_TrackingAllocator::DH_TrackingAllocator(DH_Allocator *allocator) :
-	allocations(allocator) {
+DH_TrackingAllocator::DH_TrackingAllocator(DH_Allocator *allocator){
+	allocations = DA_ORD_MemBlock::make(allocator);
 	parent = allocator;
-	insertion_index = 0;
+	total_num_allocations = 0;
 }
 
 MemBlock DH_TrackingAllocator::alloc(size_t num_bytes, char *allocation_info) {
 	MemBlock blk = parent->alloc(num_bytes);
-	MemBlockInfo info = { allocation_info,insertion_index++, blk };
+	MemBlockInfo info = { allocation_info,total_num_allocations++, blk };
 	allocations.add(info);
 	return blk;
 }

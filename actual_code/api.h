@@ -43,6 +43,7 @@ struct ViewIterator
 };
 
 
+
 typedef void(*StringFunction)(char *string_remaining, int string_length, void **user_data);
 
 enum API_MoveMode
@@ -107,7 +108,10 @@ struct Layout
 	int last_height;
 };
 
-
+struct MemBlock {
+	void  *mem;
+	size_t cap;
+};
 
 //this defines every function as a function_pointer which gets loaded on startup 
 #define API_FUNC(ret, name, params) ret(*name)params = (ret(*)params)GetProcAddress(GetModuleHandle(0),#name)
@@ -148,8 +152,8 @@ API_FUNC(BufferHandle, buffer_handle_from_view_handle, (ViewHandle view_handle))
 API_FUNC(Location, location_from_iterator, (BufferHandle bufferHandle, TextIterator it));
 API_FUNC(Location, location_from_cursor, (ViewHandle viewHandle, int cursor_index));
 API_FUNC(void **, function_info_ptr, (void *handle, void *function));
-API_FUNC(void *, memory_alloc, (void *handle, size_t size));
-API_FUNC(void, memory_free, (void *handle, void *memory));
+API_FUNC(MemBlock, memory_alloc, (void *handle, size_t size));
+API_FUNC(void, memory_free, (void *handle, MemBlock *mem_block));
 API_FUNC(int, byte_index_from_line, (BufferHandle buffer_handle, int line));
 API_FUNC(int, line_from_byte_index, (BufferHandle buffer_handle, int byte_index));
 API_FUNC(TextIterator, text_iterator_start, (BufferHandle buffer_handle));
@@ -183,9 +187,11 @@ API_FUNC(void, menu_clear, ());
 API_FUNC(void, menu_add,(API_MenuItem item));
 API_FUNC(void, menu_move_active,(int dir));
 API_FUNC(void, history_next_leaf, (ViewHandle view_handle));
-API_FUNC(void, history_insert_waypoint,(ViewHandle handle));
-
+API_FUNC(void, history_insert_waypoint,	(ViewHandle handle));
 API_FUNC(void, move_layout, (int dir,LayoutType type));
+
+API_FUNC(void, cursors_remove_dups, (ViewHandle handle));
+
 #if 0
 API_FUNC(void, set_layout, (Layout *layout));
 API_FUNC(int, get_num_views, ());

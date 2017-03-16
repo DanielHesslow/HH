@@ -39,6 +39,7 @@ void _delete(Mods mods, int direction) {
 		for (int cursor = 0; cursor < num_cursors(handle); cursor++)
 			cursor_remove_codepoint(handle, cursor, direction);
 	}
+	cursors_remove_dups(handle);
 }
 
 void _move(Mods mods, int direction) {
@@ -63,13 +64,14 @@ void _move(Mods mods, int direction) {
 		for (int cursor = 0; cursor < num_cursors(handle); cursor++)
 			cursor_move(handle, direction, cursor, mods & mod_shift, move_mode_grapheme_cluster);
 	}
-	history_insert_waypoint(handle);
+	cursors_remove_dups(handle);
 }
 
 void _moveV(Mods mods, int dir) {
 	void *handle = view_handle_focused();
 	for (int cursor = 0; cursor < num_cursors(handle); cursor++)
 		cursor_move(handle, dir, cursor, mods & mod_shift, move_mode_line);
+	cursors_remove_dups(handle);
 }
 
 
@@ -87,6 +89,7 @@ void insert_caretV(int dir) {
 		loc.line = max(loc.line + dir, 0);
 		cursor_add(view_handle, loc);
 	}
+	cursors_remove_dups(view_handle);
 }
 
 void removeAllButOneCaret() {
@@ -260,7 +263,7 @@ internal void mark_bigTitles(void *view_handle) {
 		big_titles = (std::set<int> *)*mem;
 	}
 	else {
-		big_titles = (std::set<int> *)memory_alloc(buffer_handle, sizeof(std::set<int>));
+		big_titles = (std::set<int> *)memory_alloc(buffer_handle, sizeof(std::set<int>)).mem;
 		new (big_titles)std::set<int>();
 		changed = true;
 		init_big_titles(buffer_handle, big_titles);
@@ -456,7 +459,7 @@ external void bindings(char VK_CODE, Mods mods, char *utf8, int utf8_len) {
 
 	switch (type) {
 	case M(mod_control, 'C'): copy(view);  break;
-	case M(mod_control, 'X'): cut(view);   break;
+	case M(mod_control, 'X'): cut(view); cursors_remove_dups(view); break;
 	case M(mod_control, 'V'): paste(view); break;
 	case M(mod_control, 'O'): preFeedCommandLine("openFile "); break;
 	case M(mod_control, 'B'): build(); break;
@@ -480,9 +483,9 @@ external void bindings(char VK_CODE, Mods mods, char *utf8, int utf8_len) {
 		case M(mod_control, 'D'): dir();					break;
 		case M(mod_control, 'S'): save(view);				break;
 		case M(mod_control, 'W'): view_close(view);	num_views_change();	break;
-		case M(mod_control, 'C'): view_clone(view);			break;
+		case M(mod_alt, 'C'): view_clone(view);			break;
 		case M(mod_control, 'L'): history_next_leaf(view);	break;
-		case M(mod_control, 'Z'): undo(view);				break;
+		case M(mod_control, 'Z'): history_insert_waypoint(view); undo(view); history_insert_waypoint(view);				break;
 		case M(mod_control | mod_shift, 'Z'): redo(view);		break;
 		case M(mod_none, VK_ESCAPE): removeAllButOneCaret();		break;
 
@@ -508,6 +511,8 @@ external void bindings(char VK_CODE, Mods mods, char *utf8, int utf8_len) {
 		for (int i = 0; i < utf8_len; i++)
 			for (int j = 0; j < num_cursors(view_handle_focused()); j++)
 				append_byte(view, j, -1, utf8[i]);
+		if (utf8[0] == ' ' || utf8[0] == '\n')
+			history_insert_waypoint(view);
 	}
 #undef M
 }

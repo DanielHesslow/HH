@@ -1,7 +1,6 @@
 #ifndef History_H
 #define History_H
 #include "header.h"
-
 Data *global_data;
 
 enum HistoryOpCode : uint8_t
@@ -13,6 +12,7 @@ enum HistoryOpCode : uint8_t
 	op_remove_cursor,
 	op_set_cursor,
 	op_set_view,
+	op_internal_move,
 };
 
 struct Instruction
@@ -63,9 +63,16 @@ struct Branch
 	bool last_used;
 };
 
-DEFINE_DynamicArray(Instruction);
-DEFINE_DynamicArray(Branch);
-DEFINE_DynamicArray(uint8_t);
+
+#define DA_NAME DA_Instruction
+#define DA_TYPE Instruction
+#include "DynamicArray.h"
+#define DA_NAME DA_Branch
+#define DA_TYPE Branch
+#include "DynamicArray.h"
+#define DA_NAME DA_u8
+#define DA_TYPE uint8_t
+#include "DynamicArray.h"
 
 struct WaitingMove
 {
@@ -73,29 +80,31 @@ struct WaitingMove
 	int view_id;
 	int direction;
 };
-DEFINE_DynamicArray(WaitingMove);
+#define DA_NAME DA_WaitingMove
+#define DA_TYPE WaitingMove
+#include "DynamicArray.h"
 
 
 
 struct History
 {
-	DynamicArray_int waypoints;
-	DynamicArray_Branch branches;
-	DynamicArray_Instruction instructions;
-	DynamicArray_uint8_t data;
+	DA_int waypoints;
+	DA_Branch branches;
+	DA_Instruction instructions;
+	DA_u8 data;
 	HistoryState state;
 	int next_branch;
-	DynamicArray_WaitingMove waiting_moves;
+	DA_WaitingMove waiting_moves;
 };
 
-History alloc_History(DH_Allocator allocator)
+History alloc_History(DH_Allocator *allocator)
 {
 	History ret = {};
-	ret.branches = DHDS_constructDA(Branch,50,allocator);
-	ret.instructions = DHDS_constructDA(Instruction, 50, allocator);
-	ret.data = DHDS_constructDA(uint8_t, 50, allocator);
-	ret.waiting_moves = DHDS_constructDA(WaitingMove, 20, allocator);
-	ret.waypoints = DHDS_constructDA(int, 50, allocator);
+	ret.branches = DA_Branch::make(allocator);
+	ret.instructions = DA_Instruction::make(allocator);
+	ret.data = DA_u8::make(allocator);
+	ret.waiting_moves = DA_WaitingMove::make(allocator);
+	ret.waypoints = DA_int::make(allocator);
 	ret.state.location = { -1,-1 };
 	return ret;
 }
@@ -114,4 +123,6 @@ void log_remove_cursor(History *history, int pos, bool is_selection, int cursor_
 struct BackingBuffer;
 void undo(BackingBuffer *backingBuffer);
 void redo(BackingBuffer *backingBuffer);
+void log_internal_move(History *history, int8_t direction, int cursor_id, int view_id);
+
 #endif
