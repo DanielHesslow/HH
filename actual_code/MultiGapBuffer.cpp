@@ -454,10 +454,10 @@ int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
 void appendCharacter(MultiGapBuffer *buffer, int caretId, char character)
 {
 
-	maybeGrow(mgb);
+	maybeGrow(buffer);
 	int caretIndex = indexFromId(buffer,caretId);
 	Gap gap= getGap(buffer,caretIndex);
-	assert(gap.length)
+	assert(gap.length);
 
 	gap.prev->length++;
 	*end(buffer, *gap.prev) = character;
@@ -466,7 +466,7 @@ void appendCharacter(MultiGapBuffer *buffer, int caretId, char character)
 
 void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 {
-	maybeGrow(mgb);
+	maybeGrow(buffer);
 	int caretIndex = indexFromId(buffer, caretId);
 	Gap gap = getGap(buffer,caretIndex);
 	assert(gap.length);
@@ -476,13 +476,11 @@ void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 	*start(buffer, *gap.next) = character;
 }
 
-
-
 bool removeCharacter(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
 	caretIndex = internal_push_index(buffer, history, -1, caretIndex,log);
-	BufferBlock *prev = getGap(mgb,caretIndex).prev;
+	BufferBlock *prev = getGap(buffer,caretIndex).prev;
 	if (!prev->length) return false;
 	--prev->length;
 }
@@ -492,7 +490,7 @@ bool del(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 
 	int caretIndex = indexFromId(buffer, caretId);
 	caretIndex = internal_push_index(buffer, history, 1, caretIndex, log);
-	BufferBlock *next= getGap(mgb, caretIndex).prev;
+	BufferBlock *next= getGap(buffer, caretIndex).next;
 	if (!next->length) return false;
 	--next->length;
 	++next->start;
@@ -612,6 +610,7 @@ void CheckOverlapp(MultiGapBuffer *buffer)
 bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
+	caretIndex = internal_push_index(buffer,history,caretIndex,-1,log);
 	assert(caretIndex >= 0 && caretIndex <= buffer->blocks.length - 2);
 	BufferBlock *p = &buffer->blocks.start[caretIndex];
 	BufferBlock *n = &buffer->blocks.start[caretIndex + 1];
@@ -619,12 +618,7 @@ bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretI
 	if ((caretIndex == 0 && p->length == 0))
 		return false;
 	
-	if (!p->length)
-	{
-		internal_move_index(buffer,history,-1,caretIndex,log);
-		CheckOverlapp(buffer);
-		return mgb_moveLeft(buffer,history,log,caretId);
-	}
+	assert(p->length);
 	
 	++n->length;
 	--n->start;
@@ -638,19 +632,15 @@ bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretI
 bool mgb_moveRight(MultiGapBuffer *buffer, History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
+	caretIndex = internal_push_index(buffer, history, caretIndex, 1,log);
 	assert(caretIndex >= 0 && caretIndex <= buffer->blocks.length - 2);
 	BufferBlock *p = &buffer->blocks.start[caretIndex];
 	BufferBlock *n = &buffer->blocks.start[caretIndex + 1];
 
 	if ((caretIndex == buffer->blocks.length - 2 && n->length == 0))
 		return false;
-
-	if (n->length == 0)
-	{
-		internal_move_index(buffer, history, 1, caretIndex,log);
-		CheckOverlapp(buffer);
-		return mgb_moveRight(buffer,history, log,caretId);
-	}
+	assert(n->length);
+	
 
 	++p->length;
 	*end(buffer, *p) = *start(buffer, *n);
