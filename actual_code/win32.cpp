@@ -385,6 +385,69 @@ static void GetOutlineMetrics(HDC hdc)
 	GlobalFree(buffer);
 }
 
+
+enum ttf_platform {
+	unicode = 0,
+	mac = 1,
+	ISO = 2,
+	windows = 3,
+	custum = 4,
+};
+enum ttf_encoding {
+	uni_1_0 = 0,
+	uni_1_1 = 1,
+	iso_iec10646 = 2,
+	uni_2_0_bmp = 3,
+	uni_2_0_full = 4,
+	uni_var_seq = 5,
+	uni_full = 6,
+};
+union TMP {
+	struct {
+		ttf_platform platform;
+		ttf_encoding encoding;
+	};
+	uint64_t val;
+};
+
+#define HT_KEY TMP
+#define HT_HASH(x) silly_hash(x.val)
+#define HT_NAME ll_set
+#define HT_EQUAL(a,b) a.val == b.val
+#include "L:\HashTable.h"
+ll_set set = ll_set::make(font_allocator,8);
+void iterate_strings(const stbtt_fontinfo *font) {
+	stbtt_int32 i, count, stringOffset;
+	stbtt_uint8 *fc = font->data;
+	stbtt_uint32 offset = font->fontstart;
+	stbtt_uint32 nm = stbtt__find_table(fc, offset, "name");
+	if (!nm) return ;
+
+	count = ttUSHORT(fc + nm + 2);
+	stringOffset = nm + ttUSHORT(fc + nm + 4);
+	for (i = 0; i < count; ++i) {
+		stbtt_uint32 loc = nm + 6 + 12 * i;
+		int length = ttUSHORT(fc + loc + 8);
+		char *c = (char *)(fc + stringOffset + ttUSHORT(fc + loc + 10));
+		int platformID = ttUSHORT(fc + loc + 0), encodingID = ttUSHORT(fc + loc + 2), languageID = ttUSHORT(fc + loc + 4), nameID = ttUSHORT(fc + loc + 6);
+		//if (platformID > 1  || !(nameID == 1 || nameID == 2 || nameID == 16 || nameID == 17))continue;
+		char16_t *buffer = (char16_t*)malloc(length*sizeof(char16_t));
+		TMP tmp;
+		tmp.platform = (ttf_platform)platformID;
+		tmp.encoding = (ttf_encoding)encodingID;
+		
+		set.insert(tmp);
+		for (int i = 0; i < length; i++) {
+			if (i & 1) ((char *)buffer)[i] = c[i-1];
+			else       ((char *)buffer)[i] = c[i+1];
+		}
+		buffer[length/2] = 0;
+		c[length] = 0;
+		int q = 0;
+		free(buffer);
+	}
+}
+
 void loadFonts() 
 {
 	static const LPCSTR fontRegistryPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
@@ -408,7 +471,7 @@ void loadFonts()
 	DWORD valueNameSize, valueDataSize, valueType;
 	char *wsFontFile = "";
 
-	char winDir[MAX_PATH]; //the maxpath isn't really maxpath anymore but I'm fairly confident that the windows file is inside of maxdir though...
+	char winDir[MAX_PATH]; //the maxpath isn't really maxpath anymore but I'm fairly confident that the windows file is inside of max_path though...
 	GetWindowsDirectory(winDir, MAX_PATH);
 	String system_fonts_file = String::make(winDir);
 	//load the font
@@ -416,6 +479,7 @@ void loadFonts()
 		wsFontFile = "";
 		valueDataSize = maxValueDataSize;
 		valueNameSize = maxValueNameSize;
+
 
 		result = RegEnumValue(hKey, valueIndex, valueName, &valueNameSize, 0, &valueType, (BYTE *)valueData, &valueDataSize);
 		valueIndex++;
@@ -446,7 +510,12 @@ void loadFonts()
 			// slow isch... add a merge?? add ss.copy cause these are actually permanent
 			typeface.path = ss_sprintf("%s\\FONTS\\%s", winDir, value_data.start).copy(font_allocator);
 		}
-
+		#if 0
+				stbtt_fontinfo info = {};
+				info.userdata = "stbtt internal allocation";
+				setUpTT(&info, typeface.path);
+				if (!info.data)continue;
+		#endif
 		availableFonts.add(typeface);
 	} while (result != ERROR_NO_MORE_ITEMS);
 	RegCloseKey(hKey);

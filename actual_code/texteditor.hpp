@@ -1407,7 +1407,7 @@ internal int getGlyph(Typeface::Font *font, char32_t codepoint)
 	int glyph_index;
 	if (!font->cachedGlyphs.lookup(codepoint, &glyph_index))
 	{
-		glyph_index = stbtt_FindGlyphIndex(font->font_info, codepoint);
+		glyph_index = stbtt_FindGlyphIndex(&font->font_info, codepoint);
 		font->cachedGlyphs.insert(codepoint, glyph_index);
 	}
 	return glyph_index;
@@ -1423,8 +1423,8 @@ internal int getCharacterWidth_std(char32_t currentChar, char32_t nextChar, Type
 	int glyph_current = getGlyph(font,currentChar);
 	int glyph_next = getGlyph(font,nextChar);
 
-	stbtt_GetGlyphHMetrics(font->font_info, glyph_current, &advanceWidth, &leftSideBearing);
-	int kerning = stbtt_GetGlyphKernAdvance(font->font_info, glyph_current, glyph_next);
+	stbtt_GetGlyphHMetrics(&font->font_info, glyph_current, &advanceWidth, &leftSideBearing);
+	int kerning = stbtt_GetGlyphKernAdvance(&font->font_info, glyph_current, glyph_next);
 	return (advanceWidth*scale + kerning*scale) * 3;
 }
 struct MGB_Iterator; //bacuse vs don't know how to highlight otherwise..
@@ -1685,17 +1685,14 @@ internal bool get_backingBuffer(String file_name, BackingBuffer **_out_buffer)
 
 Typeface::Font LoadFont(String path)
 {
-
-
 	Typeface::Font ret = {};
 	//@LEAK, right? 
 	ret.cachedBitmaps = HashTable_ulli_CharBitmap::make(font_allocator,16);
-	ret.cachedGlyphs = HashTable_char32_t_int::make(font_allocator,16);
+	ret.cachedGlyphs  = HashTable_char32_int::make(font_allocator,16);
 
-	ret.font_info = (stbtt_fontinfo *)malloc(sizeof(stbtt_fontinfo)); // @LEAKING THIS!
-	ret.font_info->userdata = "stbtt internal allocation";
-	setUpTT(ret.font_info,path);
-	stbtt_GetFontVMetrics(ret.font_info, &ret.ascent, &ret.descent, &ret.lineGap);
+	ret.font_info.userdata = "stbtt internal allocation";
+	setUpTT(&ret.font_info,path);
+	stbtt_GetFontVMetrics(&ret.font_info, &ret.ascent, &ret.descent, &ret.lineGap);
 	ret.lineHeight = (ret.ascent - ret.descent + ret.lineGap);
 	return ret;
 }
@@ -1709,62 +1706,19 @@ Typeface LoadTypeface(int index)
 	AvailableTypeface avail = availableTypefaces.start[index];
 	for (int i = 0; i < avail.member_len; i++)
 	{
-		if (ascii_prefix_equal(avail.members[i].name, String::make("Regular")))
-		{
+		if (ascii_prefix_equal(avail.members[i].name,      String::make("Regular")))
 			ret.Regular = LoadFont(avail.members[i].path);
-			continue;
-		}
-		if (ascii_prefix_equal(avail.members[i].name, String::make("Italic")))
-		{
+		else if (ascii_prefix_equal(avail.members[i].name, String::make("Italic")))
 			ret.Italic = LoadFont(avail.members[i].path);
-			continue;
-		}
-		if (ascii_prefix_equal(avail.members[i].name, String::make("Bold")))
-		{
+		else if (ascii_prefix_equal(avail.members[i].name, String::make("Bold")))
 			ret.Bold = LoadFont(avail.members[i].path);
-			continue;
-		}
-		if (ascii_prefix_equal(avail.members[i].name, String::make("Bold Italic")))
-		{
+		else if (ascii_prefix_equal(avail.members[i].name, String::make("Bold Italic")))
 			ret.BoldItalic = LoadFont(avail.members[i].path);
-			continue;
-		}
-		if (ascii_prefix_equal(avail.members[i].name, String::make("Demi Light")))
-		{
+		else if (ascii_prefix_equal(avail.members[i].name, String::make("Demi Light")))
 			ret.DemiLight = LoadFont(avail.members[i].path);
-			continue;
-		}
-		if (ascii_prefix_equal(avail.members[i].name, String::make("Demi Bold")))
-		{
+		else if (ascii_prefix_equal(avail.members[i].name, String::make("Demi Bold")))
 			ret.Bold = LoadFont(avail.members[i].path);
-			continue;
-		}
 	}
-	ret.Regular = LoadFont(avail.members[10].path);
-
-	assert(ret.Regular.font_info);
-	if (!ret.BoldItalic.font_info)
-	{
-		if(ret.Italic.font_info)
-			ret.BoldItalic = ret.Italic;
-		else if(ret.Bold.font_info)
-			ret.BoldItalic = ret.Bold;
-		else
-			ret.BoldItalic = ret.Regular;
-	}
-	
-	if (!ret.DemiBold.font_info)
-		ret.DemiBold = ret.Regular;
-	if (!ret.DemiLight.font_info)
-		ret.DemiLight = ret.Regular;
-
-	if (!ret.Bold.font_info)
-		ret.Bold = ret.DemiBold;
-	if (!ret.Italic.font_info)
-		ret.Italic = ret.DemiLight;
-
-	assert(ret.Italic.font_info);
-	assert(ret.Bold.font_info);
 
 	return ret;
 }
@@ -1839,7 +1793,7 @@ internal TextBuffer *allocTextBuffer(int initialMultiGapBufferSize, int initialL
 	*textBuffer = {};
 	textBuffer->allocator = allocator;
 	textBuffer->initial_rendering_state.font = getFont(String::make("Arial Unicode"));
-	textBuffer->initial_rendering_state.scale = stbtt_ScaleForPixelHeight(textBuffer->initial_rendering_state.font->font_info, 14);
+	textBuffer->initial_rendering_state.scale = stbtt_ScaleForPixelHeight(&textBuffer->initial_rendering_state.font->font_info, 14);
 	textBuffer->initial_rendering_state.color = (int)active_colorScheme.foregroundColor;
 	textBuffer->initial_rendering_state.background_color = (int)active_colorScheme.background_colors[0];
 	textBuffer->initial_rendering_state.highlight_color = 0;
@@ -2347,7 +2301,7 @@ CharBitmap loadBitmap(int codepoint, float scale, Typeface::Font *font)
 	int xOff, yOff;
 
 	int glyph_index = getGlyph(font, codepoint);
-	stbtt_fontinfo *font_info = font->font_info;
+	stbtt_fontinfo *font_info = &font->font_info;
 
 	int width, height;
 	void *charBitmapMem = stbtt_GetGlyphBitmap(font_info, scale * 3, scale, glyph_index, &width, &height, &xOff, &yOff); //statically allocate a bunch here?
@@ -3365,7 +3319,7 @@ internal void renderScreen(TextBuffer *buffer, Bitmap bitmap, int x, int y, bool
 	{
 		//if(colorIsDirty)
 		//parseForCC(buffer); 
-		float infoScale = stbtt_ScaleForPixelHeight(buffer->initial_rendering_state.font->font_info, 20);
+		float infoScale = stbtt_ScaleForPixelHeight(&buffer->initial_rendering_state.font->font_info, 20);
 		int infoSpace = buffer->initial_rendering_state.font->lineHeight*infoScale;
 	
 		int padding = 0;

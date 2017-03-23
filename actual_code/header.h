@@ -303,7 +303,7 @@ internal inline bool int_eq(int a, int b)
 #define HT_HASH(x) silly_hash(x);
 #include "L:\HashTable.h"
 
-#define HT_NAME HashTable_char32_t_int
+#define HT_NAME HashTable_char32_int
 #define HT_KEY char32_t
 #define HT_VALUE int
 #define HT_HASH(x) silly_hash(x);
@@ -314,9 +314,9 @@ struct Typeface
 {
 	struct Font
 	{
-		stbtt_fontinfo *font_info;
+		stbtt_fontinfo font_info;
 		HashTable_ulli_CharBitmap cachedBitmaps;
-		HashTable_char32_t_int cachedGlyphs;
+		HashTable_char32_int cachedGlyphs;
 		int ascent, descent, lineHeight, lineGap;
 	}Light, DemiLight, Regular, DemiBold, Bold, Black, Italic, BoldItalic;// use
 };

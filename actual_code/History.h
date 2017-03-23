@@ -40,8 +40,19 @@ struct HistoryLocation
 
 struct HCursorInfo
 {
+	// this can be implemented instead by referencing a mgb_cursor_index which gets it down to ~two bytes.
+	// however replaying changes and getting locations will be a bitch. so I reverted. (we need to simulate internal moves that happens in mgb etc.)
+	// which will basically mean if we change something it will break
+	// we don't even have this problem yet.
+
+	// the problem is when we thrash our 'regs' but really, the usual case is not that, so trading a bit of memory for that seams fair enough.
+	// I guess we could implement some do_for_all operation but idk. another problem for another day. I guess.
+
+
 	int cursor_id;
 	int view_id;
+
+	Location location;
 };
 
 struct HistoryState

@@ -340,13 +340,20 @@ inline void internal_move_index(MultiGapBuffer *mgb, History *history, int dir, 
 	DHMA_SWAP(CursorIdentifier,mgb->cursor_ids[cursor_index], mgb->cursor_ids[cursor_index + dir]);
 }
 
+//@warning does not log... only meant for history... ehh nice...
 inline void internal_move(MultiGapBuffer *mgb, History *history, int dir, int cursor_id) {
 	int cursor_index = indexFromId(mgb, cursor_id);
 	internal_move_index(mgb, history, dir, cursor_index, false);
 }
 
-
-
+void internal_push_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index) {
+	int cursor_index = indexFromId(mgb, cursor_id);
+	for (;;) {
+		if (mgb->cursor_ids[cursor_index].id != mgb->cursor_ids[cursor_index + dir].id) 
+			break;
+		internal_move_index(mgb, history, dir, cursor_index,true);
+	}
+}
 
 //this is neccessary beacuse zero length cursors need to be in a deterministic order for undo's, redos to work 
 //for example if two cursors is at the same place and you add a bunch of characters 'asdasda'
@@ -478,6 +485,12 @@ void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 
 bool removeCharacter(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 {
+	int caretIndex = indexFromId(buffer, caretId);
+	internal_push_index(buffer, history, -1, caretIndex, log);
+	if (caretIndex == 0) return false;
+	BufferBlock *prev = &buffer->blocks.start[caretIndex];
+	--prev->length;
+
 	for (;;)
 	{
 		int caretIndex = indexFromId(buffer, caretId);
@@ -485,7 +498,6 @@ bool removeCharacter(MultiGapBuffer *buffer,History *history, bool log, int care
 		if (prev->length > 0)
 		{
 			--prev->length;
-			order_mgb(buffer);
 			return true;
 		}
 		else
@@ -495,7 +507,6 @@ bool removeCharacter(MultiGapBuffer *buffer,History *history, bool log, int care
 				order_mgb(buffer);
 				return false;
 			}
-			internal_move_index(buffer, history, -1, caretIndex, log);
 		}
 	}
 }
@@ -686,4 +697,6 @@ bool mgb_moveRight(MultiGapBuffer *buffer, History *history, bool log, int caret
 	order_mgb(buffer);
 	return true;
 }
+
+
 

@@ -56,7 +56,11 @@ bool move_forward(History *history, HistoryLocation *location, int branch_index)
 struct DataAddRemoveCursor
 {
 	int pos;
-	bool is_selection;
+	bool is_selection; 
+	// note to self. this is fucking neccssary, 
+	// don't look into it one more time dude. 
+	// we need it to re-add it to the textbuffers list of owned carets / owned selection carets. Can't do no search if it aint there.
+
 };
 
 struct InstructionData
