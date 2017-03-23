@@ -346,13 +346,22 @@ inline void internal_move(MultiGapBuffer *mgb, History *history, int dir, int cu
 	internal_move_index(mgb, history, dir, cursor_index, false);
 }
 
-void internal_push_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index) {
-	int cursor_index = indexFromId(mgb, cursor_id);
-	for (;;) {
-		if (mgb->cursor_ids[cursor_index].id != mgb->cursor_ids[cursor_index + dir].id) 
-			break;
-		internal_move_index(mgb, history, dir, cursor_index,true);
+int internal_push_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index, bool log) {
+	if (dir == 1) {
+		while (cursor_index < mgb->cursor_ids.length-1) {
+			if (getGap(mgb, cursor_index).next->length != 0) break;
+			internal_move_index(mgb, history, 1, cursor_index, log);
+			cursor_index += 1;
+		}
 	}
+	else {
+		while(cursor_index > 0) {
+			if (getGap(mgb, cursor_index).prev->length != 0) break;
+			internal_move_index(mgb, history, -1, cursor_index, log);
+			cursor_index -= 1;
+		}
+	}
+	return cursor_index;
 }
 
 //this is neccessary beacuse zero length cursors need to be in a deterministic order for undo's, redos to work 
@@ -444,41 +453,27 @@ int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
 
 void appendCharacter(MultiGapBuffer *buffer, int caretId, char character)
 {
-	// for everybody complaining about how bad hungarian notation is.
-	// this right here below is the propper apps-hungarian.
-	// not the missunderstood one that microsoft is using today.
-	// It's not bad. It's just a simple way to keep track of what's what. 
-	// I'm guessing most people are using something similar. 
 
+	maybeGrow(mgb);
 	int caretIndex = indexFromId(buffer,caretId);
 	Gap gap= getGap(buffer,caretIndex);
-	if (gap.length)
-	{
-		gap.prev->length++;
-		*end(buffer, *gap.prev) = character;
-	}
-	else
-	{
-		maybeGrow(buffer);
-		appendCharacter(buffer, caretId, character);
-	}
+	assert(gap.length)
+
+	gap.prev->length++;
+	*end(buffer, *gap.prev) = character;
+	
 }
 
 void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 {
+	maybeGrow(mgb);
 	int caretIndex = indexFromId(buffer, caretId);
 	Gap gap = getGap(buffer,caretIndex);
-	if (gap.length)
-	{
-		--gap.next->start;
-		gap.next->length++;
-		*start(buffer, *gap.next)= character;
-	}
-	else
-	{
-		maybeGrow(buffer);
-		invDelete(buffer, caretId, character);
-	}
+	assert(gap.length);
+
+	--gap.next->start;
+	gap.next->length++;
+	*start(buffer, *gap.next) = character;
 }
 
 
@@ -486,54 +481,21 @@ void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 bool removeCharacter(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
-	internal_push_index(buffer, history, -1, caretIndex, log);
-	if (caretIndex == 0) return false;
-	BufferBlock *prev = &buffer->blocks.start[caretIndex];
+	caretIndex = internal_push_index(buffer, history, -1, caretIndex,log);
+	BufferBlock *prev = getGap(mgb,caretIndex).prev;
+	if (!prev->length) return false;
 	--prev->length;
-
-	for (;;)
-	{
-		int caretIndex = indexFromId(buffer, caretId);
-		BufferBlock *prev = &buffer->blocks.start[caretIndex];
-		if (prev->length > 0)
-		{
-			--prev->length;
-			return true;
-		}
-		else
-		{
-			if (caretIndex == 0)
-			{
-				order_mgb(buffer);
-				return false;
-			}
-		}
-	}
 }
 
 bool del(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 {
-	for (;;)
-	{
-		int caretIndex = indexFromId(buffer, caretId);
-		BufferBlock *next = &buffer->blocks.start[caretIndex+1];
-		if (next->length > 0)
-		{
-			--next->length;
-			++next->start;
-			order_mgb(buffer);
-			return true;
-		}
-		else
-		{
-			if (caretIndex >= buffer->blocks.length-2)
-			{
-				order_mgb(buffer);
-				return false;
-			}
-			internal_move_index(buffer,history, 1, caretIndex, log);
-		}
-	}
+
+	int caretIndex = indexFromId(buffer, caretId);
+	caretIndex = internal_push_index(buffer, history, 1, caretIndex, log);
+	BufferBlock *next= getGap(mgb, caretIndex).prev;
+	if (!next->length) return false;
+	--next->length;
+	++next->start;
 }
 
 
