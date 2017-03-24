@@ -971,7 +971,7 @@ internal void appendCharacter(TextBuffer *textBuffer, char character, int caretI
 	
 	appendCharacter(textBuffer->backingBuffer->buffer, caretId, character);
 	if (log) {
-		log_add(&textBuffer->backingBuffer->history, -1, character, caretId, textBuffer->textBuffer_id);
+		log_add(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, -1, character, caretId, textBuffer->textBuffer_id);
 	}
 	
 	change_added(textBuffer->backingBuffer, loc, character);
@@ -1001,7 +1001,7 @@ internal bool removeCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log
 	markPreferedCaretXDirty(textBuffer, caretIdIndex);
 	if (removed && log)
 	{
-		log_remove(&textBuffer->backingBuffer->history, -1, toBeRemoved, caretId, textBuffer->textBuffer_id);
+		log_remove(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, -1, toBeRemoved, caretId, textBuffer->textBuffer_id);
 	}
 	return removed;
 }

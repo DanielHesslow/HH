@@ -335,10 +335,9 @@ void maybeGrow(MultiGapBuffer *buffer)
 		rebalance(buffer, 0, 0);
 	}
 }
-//function that mgb calls for internal moves, if it comes from history (log == false) we're doing something wrong!
+//function that mgb calls for internal moves
 inline void internal_move_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index, bool log) {
-	assert(log);
-	if(log)log_internal_move(history, dir, mgb->cursor_ids[cursor_index].id, mgb->cursor_ids[cursor_index].textBuffer_index);
+	if(log)log_internal_move(history, mgb,dir, mgb->cursor_ids[cursor_index].id, mgb->cursor_ids[cursor_index].textBuffer_index);
 	DHMA_SWAP(CursorIdentifier,mgb->cursor_ids[cursor_index], mgb->cursor_ids[cursor_index + dir]);
 }
 
@@ -350,17 +349,19 @@ inline void internal_move(MultiGapBuffer *mgb, History *history, int dir, int cu
 }
 
 //mgb calls for internal moves
-int internal_push_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index, bool log) {
+int internal_push_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index, bool log, bool direct_history=false) {
 	if (dir == 1) {
 		while (cursor_index < mgb->cursor_ids.length - 1) {
 			if (getGap(mgb, cursor_index).next->length != 0) break;
 			internal_move_index(mgb, history, 1, cursor_index, log);
+			assert(log || direct_history);
 			cursor_index += 1;
 		}
 	} else {
 		while (cursor_index > 0) {
 			if (getGap(mgb, cursor_index).prev->length != 0) break;
 			internal_move_index(mgb, history, -1, cursor_index, log);
+			assert(log || direct_history); // make sure we're not comming indirectely from history.
 			cursor_index -= 1;
 		}
 	}

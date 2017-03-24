@@ -125,14 +125,15 @@ enum HistoryDirection
 	history_dir_left,
 	history_dir_right,
 };
-void log_move(History *history, int direction, int cursor_id, int view_id);
-void log_add(History *history, int8_t direction, char byte, int cursor_id, int view_id);
-void log_remove(History *history, int direction, char byte, int cursor_id, int view_id);
-void log_add_cursor(History *history, int pos, bool is_selection, int cursor_id, int view_id);
-void log_remove_cursor(History *history, int pos, bool is_selection, int cursor_id, int view_id);
+struct MultiGapBuffer;	
+void log_move(History *history, MultiGapBuffer *mgb, int direction, int cursor_id, int view_id);
+void log_add(History *history, MultiGapBuffer *mgb, int8_t direction, char byte, int cursor_id, int view_id);
+void log_remove(History *history, MultiGapBuffer *mgb, int direction, char byte, int cursor_id, int view_id);
+void log_add_cursor(History *history, MultiGapBuffer *mgb, int pos, bool is_selection, int cursor_id, int view_id);
+void log_remove_cursor(History *history, MultiGapBuffer *mgb, int pos, bool is_selection, int cursor_id, int view_id);
 struct BackingBuffer;
 void undo(BackingBuffer *backingBuffer);
 void redo(BackingBuffer *backingBuffer);
-void log_internal_move(History *history, int8_t direction, int cursor_id, int view_id);
+void log_internal_move(History *history, MultiGapBuffer *mgb, int8_t direction, int cursor_id, int view_id);
 
 #endif

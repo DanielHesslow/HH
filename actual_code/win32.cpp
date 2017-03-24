@@ -674,7 +674,7 @@ WinMain(HINSTANCE instance,
 	//Layout *split_a = CREATE_LAYOUT(layout_type_x, 1, CREATE_LAYOUT(layout_type_y,1,leaf,0.3,leaf,0.7,leaf), 0.7f, leaf);
 	//Layout *split_b = CREATE_LAYOUT(layout_type_x, 1, leaf, 0.3f, leaf);
 
-	data.layout = CREATE_LAYOUT(layout_type_y, 2, leaf, .5, CREATE_LAYOUT(layout_type_x,2,leaf,.5,leaf));
+	data.layout = CREATE_LAYOUT(layout_type_x,2,leaf,.5,leaf);
 
 	uint16_t timeSinceStartUpInMs;
 		

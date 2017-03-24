@@ -26,12 +26,13 @@
 // note all manipulations are relative to previous values, so we can undo/redo them.
 // further complicating stuff moves are lazy because we usually move multiple cursors left and right and "patching" them after they're added seemd too complicated
 
-// NOTE TODO
+//    TODO
 // NOT YET WORKING with mutliple views
 // we need to make sure that we can only undo stuff that we've made in one view. undoing stuff in other views seems counter intuitive to me
 // certainly when/if we get networked connections from other people. 
+// we also need to select somebody to take over a buffers history if we close it.
 
-// NOTE PREF
+//     PREF
 // we currently store branches in unsorted dynamic arrays, this makes for slow lookup times
 // same goes for undo_waypoints
 // keeping two dynamic arrays for the branches one sorted in from and one to and then doing binary searches seams quite a bit faster to me 
@@ -40,7 +41,7 @@
 // might indicate that a hashtable for at least the to-branches might be a good idea. 
 // we'll get to that if it's needed.
 
-// Oh and we cursor additions/removes should probably be lazy as well. 
+// Oh and our cursor additions/removes should probably be lazy as well. 
 
 // Another alternative to this is to employ full on compression, that would for sure mean we get a lower memory foot print and the local complexity goes down
 // However I don't know about the perf. Might actually be better. Might be better to keep this and do it post. IDK.
@@ -193,12 +194,19 @@ cursor_set:
 }
 
 
-void _log_lazy_moves(History *history) {
+void _log_lazy_moves(History *history, MultiGapBuffer *mgb) {
 	for (int i = 0; i < history->waiting_moves.length; i++) {
 		WaitingMove move = history->waiting_moves.start[i];
 		int dir = move.direction > 0 ? 1 : -1;
 		int magnitude = move.direction*dir;
-		append_instruction(history, op_move, move.cursor_id, move.view_id, move.direction, &magnitude);
+		if (move.direction != 0) {
+			if (move.direction > 0) {
+				internal_push_index(mgb,history, -1,indexFromId(mgb,move.cursor_id),true);
+			} else {
+				internal_push_index(mgb, history, 1, indexFromId(mgb, move.cursor_id), true);
+			}
+			append_instruction(history, op_move, move.cursor_id, move.view_id, move.direction, &magnitude);
+		}
 	};
 	history->waiting_moves.length = 0;
 }
@@ -211,7 +219,7 @@ inline bool checked_add_s32(int32_t a, int32_t b, int32_t *_out_res) {
 }
 
 // --- header declared functions
-void log_move(History *history, int direction, int cursor_id, int view_id) {
+void log_move(History *history, MultiGapBuffer *mgb, int direction, int cursor_id, int view_id) {
 	for (int i = 0; i < history->waiting_moves.length; i++) {
 		if (history->waiting_moves.start[i].cursor_id == cursor_id) {
 			WaitingMove *move = &history->waiting_moves.start[i];
@@ -220,7 +228,7 @@ void log_move(History *history, int direction, int cursor_id, int view_id) {
 				move->direction = res;
 				return;
 			} else {
-				_log_lazy_moves(history);
+				_log_lazy_moves(history, mgb);
 			}
 		}
 	}
@@ -229,35 +237,36 @@ void log_move(History *history, int direction, int cursor_id, int view_id) {
 	move.direction = direction;
 	move.view_id = view_id;
 	history->waiting_moves.add(move);
+	_log_lazy_moves(history,mgb);
 }
 
 
-void log_internal_move(History *history, int8_t direction, int cursor_id, int view_id) {
-	_log_lazy_moves(history);
+void log_internal_move(History *history, MultiGapBuffer *mgb, int8_t direction, int cursor_id, int view_id) {
+	_log_lazy_moves(history,mgb);
 	append_instruction(history, op_internal_move, cursor_id, view_id, direction, NULL);
 
 }
 
-void log_add(History *history, int8_t direction, char byte, int cursor_id, int view_id) {
-	_log_lazy_moves(history);
+void log_add(History *history, MultiGapBuffer *mgb, int8_t direction, char byte, int cursor_id, int view_id) {
+	_log_lazy_moves(history,mgb);
 	append_instruction(history, op_add, cursor_id, view_id, direction, &byte);
 }
 
-void log_remove(History *history, int direction, char byte, int cursor_id, int view_id) {
-	_log_lazy_moves(history);
+void log_remove(History *history, MultiGapBuffer *mgb, int direction, char byte, int cursor_id, int view_id) {
+	_log_lazy_moves(history,mgb);
 	append_instruction(history, op_remove, cursor_id, view_id, direction, &byte);
 }
 
-void log_add_cursor(History *history, int pos, bool is_selection, int cursor_id, int view_id) {
-	_log_lazy_moves(history);
+void log_add_cursor(History *history, MultiGapBuffer *mgb, int pos, bool is_selection, int cursor_id, int view_id) {
+	_log_lazy_moves(history,mgb);
 	DataAddRemoveCursor data = {};
 	data.pos = pos;
 	data.is_selection = is_selection;
 	append_instruction(history, op_add_cursor, cursor_id, view_id, 0, &data);
 }
 
-void log_remove_cursor(History *history, int pos, bool is_selection, int cursor_id, int view_id) {
-	_log_lazy_moves(history);
+void log_remove_cursor(History *history, MultiGapBuffer *mgb, int pos, bool is_selection, int cursor_id, int view_id) {
+	_log_lazy_moves(history,mgb);
 	DataAddRemoveCursor data = {};
 	data.pos = pos;
 	data.is_selection = is_selection;
@@ -469,7 +478,7 @@ bool expand_instruction_at(BackingBuffer *backingBuffer, HistoryLocation locatio
 bool undo_(BackingBuffer *backingBuffer) {
 	History *history = &backingBuffer->history;
 	MultiGapBuffer *mgb = backingBuffer->buffer;
-	_log_lazy_moves(history);
+	_log_lazy_moves(history,backingBuffer->buffer);
 	ExpandedInstruction instr;
 
 	bool success = expand_instruction_at(backingBuffer, history->state.location, &instr);
@@ -521,7 +530,7 @@ bool undo_(BackingBuffer *backingBuffer) {
 	{
 		assert(instr.cursor_id_index != -1);
 		DataAddRemoveCursor data = instr.data.add_remove_cursor;
-		removeCaret(mgb, history,instr.cursor_id);
+		removeCaret(mgb, history, instr.cursor_id);
 		if (!data.is_selection) {
 			instr.textBuffer->ownedCarets_id.removeOrd(instr.cursor_id_index);
 			instr.textBuffer->cursorInfo.removeOrd(instr.cursor_id_index);
@@ -540,7 +549,7 @@ bool redo_(BackingBuffer *backingBuffer, int index) {
 	HistoryLocation loc = history->state.location;
 	if (!move_forward(history, &loc, index))return false;
 
-	_log_lazy_moves(history);
+	_log_lazy_moves(history,mgb);
 	ExpandedInstruction instr;
 	bool success = expand_instruction_at(backingBuffer, loc, &instr);
 	if (!success) return false;
@@ -593,7 +602,7 @@ bool redo_(BackingBuffer *backingBuffer, int index) {
 	{
 		assert(instr.cursor_id_index != -1);
 		DataAddRemoveCursor data = instr.data.add_remove_cursor;
-		removeCaret(mgb, history,instr.cursor_id);
+		removeCaret(mgb, history, instr.cursor_id);
 		if (!data.is_selection) {
 			instr.textBuffer->ownedCarets_id.removeOrd(instr.cursor_id_index);
 			instr.textBuffer->cursorInfo.removeOrd(instr.cursor_id_index);
@@ -606,11 +615,7 @@ bool redo_(BackingBuffer *backingBuffer, int index) {
 	return true;
 }
 
-struct HistoryIterator {
-	bool add_remove;
-	bool move;
-	bool cursor_add_remove;
-};
+
 
 // note branchindexing doesn't work right.
 // we continue on with the same branch index which will break stuff. aint good.
@@ -623,7 +628,6 @@ bool waypoint_at(History *history, int prev_instruction_index) {
 
 void redo(BackingBuffer *backingBuffer) {
 	History *history = &backingBuffer->history;
-	HistoryIterator it = {};
 	do {
 		if (!can_redo(history, history->state.location))break;
 		//if (end_iteration(&instruction, &it))break;
@@ -637,7 +641,6 @@ void redo(BackingBuffer *backingBuffer) {
 
 void undo(BackingBuffer *backingBuffer) {
 	History *history = &backingBuffer->history;
-	HistoryIterator it = {};
 	do {
 		if (!can_undo(history, history->state.location))break;
 		ExpandedInstruction instruction;
@@ -674,7 +677,7 @@ bool is_leaf(History *history, HistoryLocation location) {
 }
 
 // obtains the location of the next leaf
-HistoryLocation next_leaf(History *history, HistoryLocation current) {
+HistoryLocation next_leaf_location(History *history, HistoryLocation current) {
 	//NOTE PERFORMANCE, branches in unsorted array lol
 	if (current.prev_instruction_index == history->instructions.length - 1) {
 		current = { -2, -2 };
@@ -708,11 +711,11 @@ HistoryLocation next_leaf(History *history, HistoryLocation current) {
 //undos/redos to set the buffer to the next leafs state.
 void next_leaf(BackingBuffer *backingBuffer) {
 	//NOTE PERFORMANCE, branches in unsorted array lol
-	_log_lazy_moves(&backingBuffer->history);
+	_log_lazy_moves(&backingBuffer->history,backingBuffer->buffer);
 
 	History *history = &backingBuffer->history;
 	HistoryLocation current = history->state.location;
-	HistoryLocation target = next_leaf(history, current);
+	HistoryLocation target = next_leaf_location(history, current);
 	HistoryLocation target_cpy = target;
 	int *arr = (int *)MemStack_GetTop();
 	int len = 0;
