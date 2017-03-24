@@ -1026,7 +1026,7 @@ internal void unDeleteCharacter(TextBuffer *textBuffer,  char character, int car
 	int cursor_id = textBuffer->ownedCarets_id.start[caretIdIndex];
 	Location loc = getLocationFromCaret(textBuffer, cursor_id);
 	invDelete(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[caretIdIndex], character);
-	if(log)log_add(&textBuffer->backingBuffer->history, 1, character, cursor_id, textBuffer->textBuffer_id);
+	if(log)log_add(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, 1, character, cursor_id, textBuffer->textBuffer_id);
 	loc.column;
 	loc = push_valid(textBuffer->backingBuffer, loc);
 	change_added(textBuffer->backingBuffer, loc, character);
@@ -1046,7 +1046,7 @@ internal bool deleteCharacter(TextBuffer *textBuffer, int caretIdIndex, bool log
 	}
 	if (deleted && log)
 	{
-		log_remove(&textBuffer->backingBuffer->history, 1, toBeDeleted, caretId, textBuffer->textBuffer_id);
+		log_remove(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, 1, toBeDeleted, caretId, textBuffer->textBuffer_id);
 	}
 	return deleted;
 }
@@ -1174,7 +1174,7 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, boo
 			{
 				if (log)
 				{
-					log_move(&textBuffer->backingBuffer->history, -1, caretId, textBuffer->textBuffer_id);
+					log_move(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, -1, caretId, textBuffer->textBuffer_id);
 				}
 				success = true;
 			}
@@ -1186,7 +1186,7 @@ internal bool move_llnc_(TextBuffer *textBuffer, Direction dir, int caretId, boo
 			{
 				if (log)
 				{
-					log_move(&textBuffer->backingBuffer->history, 1, caretId, textBuffer->textBuffer_id);
+					log_move(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, 1, caretId, textBuffer->textBuffer_id);
 				}
 				success = true;
 			}
@@ -1822,8 +1822,8 @@ void AddCaret(TextBuffer *textBuffer, int pos)
 	int id_sel = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, pos);
 	textBuffer->ownedSelection_id.add(id_sel);
 
-	log_add_cursor(&textBuffer->backingBuffer->history, pos, false,  id, textBuffer->textBuffer_id);
-	log_add_cursor(&textBuffer->backingBuffer->history, pos, true, id_sel, textBuffer->textBuffer_id);
+	log_add_cursor(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, pos, false,  id, textBuffer->textBuffer_id);
+	log_add_cursor(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, pos, true, id_sel, textBuffer->textBuffer_id);
 	CursorInfo info = {};
 	textBuffer->cursorInfo.add(info);
 }
@@ -1837,8 +1837,8 @@ internal void removeCaret(TextBuffer *textBuffer, int caretIdIndex, bool log)
 	removeCaret(textBuffer->backingBuffer->buffer, &textBuffer->backingBuffer->history, textBuffer->ownedSelection_id.start[caretIdIndex]);
 	
 	if (log) {
-		log_remove_cursor(&textBuffer->backingBuffer->history, pos_caret, false, textBuffer->ownedCarets_id.start[caretIdIndex], textBuffer->textBuffer_id);
-		log_remove_cursor(&textBuffer->backingBuffer->history, pos_selection, true, textBuffer->ownedSelection_id.start[caretIdIndex], textBuffer->textBuffer_id);
+		log_remove_cursor(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, pos_caret, false, textBuffer->ownedCarets_id.start[caretIdIndex], textBuffer->textBuffer_id);
+		log_remove_cursor(&textBuffer->backingBuffer->history, textBuffer->backingBuffer->buffer, pos_selection, true, textBuffer->ownedSelection_id.start[caretIdIndex], textBuffer->textBuffer_id);
 	}
 
 	textBuffer->ownedCarets_id.removeOrd(caretIdIndex);

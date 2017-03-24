@@ -200,11 +200,8 @@ void _log_lazy_moves(History *history, MultiGapBuffer *mgb) {
 		int dir = move.direction > 0 ? 1 : -1;
 		int magnitude = move.direction*dir;
 		if (move.direction != 0) {
-			if (move.direction > 0) {
-				internal_push_index(mgb,history, -1,indexFromId(mgb,move.cursor_id),true);
-			} else {
-				internal_push_index(mgb, history, 1, indexFromId(mgb, move.cursor_id), true);
-			}
+			// make the current order the same as the order that we'd get if we undo and redo
+			internal_push_index(mgb, history, move.direction > 0 ? -1 : 1, indexFromId(mgb, move.cursor_id), false, true);
 			append_instruction(history, op_move, move.cursor_id, move.view_id, move.direction, &magnitude);
 		}
 	};
@@ -237,28 +234,27 @@ void log_move(History *history, MultiGapBuffer *mgb, int direction, int cursor_i
 	move.direction = direction;
 	move.view_id = view_id;
 	history->waiting_moves.add(move);
-	_log_lazy_moves(history,mgb);
 }
 
 
 void log_internal_move(History *history, MultiGapBuffer *mgb, int8_t direction, int cursor_id, int view_id) {
-	_log_lazy_moves(history,mgb);
+	_log_lazy_moves(history, mgb);
 	append_instruction(history, op_internal_move, cursor_id, view_id, direction, NULL);
 
 }
 
 void log_add(History *history, MultiGapBuffer *mgb, int8_t direction, char byte, int cursor_id, int view_id) {
-	_log_lazy_moves(history,mgb);
+	_log_lazy_moves(history, mgb);
 	append_instruction(history, op_add, cursor_id, view_id, direction, &byte);
 }
 
 void log_remove(History *history, MultiGapBuffer *mgb, int direction, char byte, int cursor_id, int view_id) {
-	_log_lazy_moves(history,mgb);
+	_log_lazy_moves(history, mgb);
 	append_instruction(history, op_remove, cursor_id, view_id, direction, &byte);
 }
 
 void log_add_cursor(History *history, MultiGapBuffer *mgb, int pos, bool is_selection, int cursor_id, int view_id) {
-	_log_lazy_moves(history,mgb);
+	_log_lazy_moves(history, mgb);
 	DataAddRemoveCursor data = {};
 	data.pos = pos;
 	data.is_selection = is_selection;
@@ -266,7 +262,7 @@ void log_add_cursor(History *history, MultiGapBuffer *mgb, int pos, bool is_sele
 }
 
 void log_remove_cursor(History *history, MultiGapBuffer *mgb, int pos, bool is_selection, int cursor_id, int view_id) {
-	_log_lazy_moves(history,mgb);
+	_log_lazy_moves(history, mgb);
 	DataAddRemoveCursor data = {};
 	data.pos = pos;
 	data.is_selection = is_selection;
@@ -478,7 +474,7 @@ bool expand_instruction_at(BackingBuffer *backingBuffer, HistoryLocation locatio
 bool undo_(BackingBuffer *backingBuffer) {
 	History *history = &backingBuffer->history;
 	MultiGapBuffer *mgb = backingBuffer->buffer;
-	_log_lazy_moves(history,backingBuffer->buffer);
+	_log_lazy_moves(history, backingBuffer->buffer);
 	ExpandedInstruction instr;
 
 	bool success = expand_instruction_at(backingBuffer, history->state.location, &instr);
@@ -549,7 +545,7 @@ bool redo_(BackingBuffer *backingBuffer, int index) {
 	HistoryLocation loc = history->state.location;
 	if (!move_forward(history, &loc, index))return false;
 
-	_log_lazy_moves(history,mgb);
+	_log_lazy_moves(history, mgb);
 	ExpandedInstruction instr;
 	bool success = expand_instruction_at(backingBuffer, loc, &instr);
 	if (!success) return false;
@@ -646,8 +642,10 @@ void undo(BackingBuffer *backingBuffer) {
 		ExpandedInstruction instruction;
 		if (!expand_instruction_at(backingBuffer, history->state.location, &instruction))return;
 		undo_(backingBuffer);
-		if (instruction.textBuffer)
+		if (instruction.textBuffer) {
 			markPreferedCaretXDirty(instruction.textBuffer, instruction.cursor_id_index);
+			view_set_focused(instruction.textBuffer);
+		}
 	} while (!waypoint_at(history, history->state.location.prev_instruction_index));
 }
 
@@ -711,7 +709,7 @@ HistoryLocation next_leaf_location(History *history, HistoryLocation current) {
 //undos/redos to set the buffer to the next leafs state.
 void next_leaf(BackingBuffer *backingBuffer) {
 	//NOTE PERFORMANCE, branches in unsorted array lol
-	_log_lazy_moves(&backingBuffer->history,backingBuffer->buffer);
+	_log_lazy_moves(&backingBuffer->history, backingBuffer->buffer);
 
 	History *history = &backingBuffer->history;
 	HistoryLocation current = history->state.location;

@@ -778,6 +778,7 @@ external void view_set_focused(ViewHandle view_handle) {
 		assert(textBuffer_index(tb, &target_index));
 		assert(target_index >= 0 && target_index < global_data->textBuffers.length);
 		global_data->activeTextBufferIndex = target_index;
+		global_data->isCommandlineActive = false;
 	}
 }
 
@@ -824,7 +825,7 @@ external void history_next_leaf(ViewHandle handle) {
 
 external void history_insert_waypoint(ViewHandle handle) {
 	TextBuffer *tb = (TextBuffer *)handle;
-	_log_lazy_moves(&tb->backingBuffer->history);
+	_log_lazy_moves(&tb->backingBuffer->history,tb->backingBuffer->buffer);
 	tb->backingBuffer->history.waypoints.add(tb->backingBuffer->history.state.location.prev_instruction_index);
 }
 
