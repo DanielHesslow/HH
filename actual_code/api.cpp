@@ -1,6 +1,5 @@
 // BACKEND API LAYER
 
-#define API extern "C" __declspec(dllexport)
 
 #define HEADER_ONLY
 //#include "api.h"

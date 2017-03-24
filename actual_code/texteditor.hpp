@@ -3085,7 +3085,6 @@ internal bool stripInitialWhite(MultiGapBuffer *buffer, MGB_Iterator *it, int *c
 }
 
 //this one should come from the dll
-struct API;
 
 void(*setBindingsLocal)(void *view_handle);
 void(*execute_bindings)(char VK_CODE, Mods mods, char *utf8, int utf8_len);

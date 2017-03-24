@@ -72,9 +72,6 @@ enum BufferModes
 };
 
 
-#ifndef API
-#define API 
-#endif
 
 
 #ifndef HEADER_ONLY
@@ -115,6 +112,9 @@ struct MemBlock {
 
 //this defines every function as a function_pointer which gets loaded on startup 
 #define API_FUNC(ret, name, params) ret(*name)params = (ret(*)params)GetProcAddress(GetModuleHandle(0),#name)
+#else
+#define API_FUNC(ret, name, params) external ret name params
+#endif //HEADER_ONLY
 
 API_FUNC(ViewIterator, view_iterator_from_buffer_handle, (BufferHandle buffer_handle));
 API_FUNC(bool, view_iterator_next, (ViewIterator *iterator, ViewHandle *view_handle));
@@ -151,7 +151,7 @@ API_FUNC(BufferHandle, buffer_handle_cmdline, ());
 API_FUNC(BufferHandle, buffer_handle_from_view_handle, (ViewHandle view_handle));
 API_FUNC(Location, location_from_iterator, (BufferHandle bufferHandle, TextIterator it));
 API_FUNC(Location, location_from_cursor, (ViewHandle viewHandle, int cursor_index));
-API_FUNC(void **, function_info_ptr, (void *handle, void *function));
+API_FUNC(void *, function_info_ptr, (void *handle, void *function));
 API_FUNC(MemBlock, memory_alloc, (void *handle, size_t size));
 API_FUNC(void, memory_free, (void *handle, MemBlock *mem_block));
 API_FUNC(int, byte_index_from_line, (BufferHandle buffer_handle, int line));
@@ -198,8 +198,8 @@ API_FUNC(int, get_num_views, ());
 API_FUNC(void, createLayout, ());
 #endif
 
-#endif //HEADER ONLY
 
+#undef API_FUNC
 
 
 #endif 

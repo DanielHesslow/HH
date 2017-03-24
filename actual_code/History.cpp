@@ -611,7 +611,8 @@ bool redo_(BackingBuffer *backingBuffer, int index) {
 	return true;
 }
 
-
+#define HEADER_ONLY
+#include "api.h"
 
 // note branchindexing doesn't work right.
 // we continue on with the same branch index which will break stuff. aint good.

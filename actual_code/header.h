@@ -51,7 +51,6 @@ enum Direction
 
 #include "History.h"
 #include "MultiGapBuffer.h"
-#include "api.h"
 struct ColorChange
 {
 	int index;
