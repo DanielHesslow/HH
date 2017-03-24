@@ -86,7 +86,7 @@ void insert_caretV(int dir) {
 	int _num_cursors = num_cursors(view_handle);
 	for (int cursor = 0; cursor < _num_cursors; cursor++) {
 		Location loc = location_from_cursor(view_handle, cursor);
-		loc.line = max(loc.line + dir, 0);
+		loc.line = max(loc.line + dir, 0);  //yea this is wrong, what we should do is insert on line above and move to prefered x...
 		cursor_add(view_handle, loc);
 	}
 	cursors_remove_dups(view_handle);

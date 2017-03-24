@@ -335,27 +335,30 @@ void maybeGrow(MultiGapBuffer *buffer)
 		rebalance(buffer, 0, 0);
 	}
 }
+//function that mgb calls for internal moves, if it comes from history (log == false) we're doing something wrong!
 inline void internal_move_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index, bool log) {
+	assert(log);
 	if(log)log_internal_move(history, dir, mgb->cursor_ids[cursor_index].id, mgb->cursor_ids[cursor_index].textBuffer_index);
 	DHMA_SWAP(CursorIdentifier,mgb->cursor_ids[cursor_index], mgb->cursor_ids[cursor_index + dir]);
 }
 
-//@warning does not log... only meant for history... ehh nice...
+
+//function that history calls for internal moves
 inline void internal_move(MultiGapBuffer *mgb, History *history, int dir, int cursor_id) {
 	int cursor_index = indexFromId(mgb, cursor_id);
-	internal_move_index(mgb, history, dir, cursor_index, false);
+	DHMA_SWAP(CursorIdentifier, mgb->cursor_ids[cursor_index], mgb->cursor_ids[cursor_index + dir]);
 }
 
+//mgb calls for internal moves
 int internal_push_index(MultiGapBuffer *mgb, History *history, int dir, int cursor_index, bool log) {
 	if (dir == 1) {
-		while (cursor_index < mgb->cursor_ids.length-1) {
+		while (cursor_index < mgb->cursor_ids.length - 1) {
 			if (getGap(mgb, cursor_index).next->length != 0) break;
 			internal_move_index(mgb, history, 1, cursor_index, log);
 			cursor_index += 1;
 		}
-	}
-	else {
-		while(cursor_index > 0) {
+	} else {
+		while (cursor_index > 0) {
 			if (getGap(mgb, cursor_index).prev->length != 0) break;
 			internal_move_index(mgb, history, -1, cursor_index, log);
 			cursor_index -= 1;
@@ -364,54 +367,13 @@ int internal_push_index(MultiGapBuffer *mgb, History *history, int dir, int curs
 	return cursor_index;
 }
 
-//this is neccessary beacuse zero length cursors need to be in a deterministic order for undo's, redos to work 
-//for example if two cursors is at the same place and you add a bunch of characters 'asdasda'
-//the other may be at the start or at the end, |'asdasda', 'asdasda'|, both valid, for the other cursor.
-//therefor we always keep them sorted on id when they're in the same place, 
-//another (probably more complicated) alternative is to log in history zero lenght moves accross other cursors. but that seams silly. 
 
-// sures seemed silly.. however, it does work. which you you know, is better than can be said about the above...
-
-void order_mgb(MultiGapBuffer *buffer)
-{
-#if 0
-	int N = buffer->cursor_ids.length - 1;
-#if 0
-	//debug shit.
-	int ack=0;
-	for (int i = 0; i < N; i++) {
-		Gap gap = getGap(buffer, i);
-		if (gap.next->length == 0) ++ack;
-	}
-	dpr(ack);
-#endif
-	
-	//bubble sort isch actually fast enough here though we could improve it we'll likely do 0 swaps and will only swap a max of number of cursors at the same pos. Which is super low. 
-	for (int n = 0; n < N; n++)
-	{
-		bool swap = false;
-		for (int i = 0; (i + n) < N; i++)
-		{
-			Gap gap = getGap(buffer, i);
-			if (!gap.next->length)
-			{
-				if (buffer->cursor_ids.start[i].id > buffer->cursor_ids.start[i + 1].id)
-				{
-					DHMA_SWAP(CursorIdentifier, buffer->cursor_ids.start[i], buffer->cursor_ids.start[i + 1]);
-					swap = true;
-				}
-			}
-		}
-		if (!swap)break;
-	}
-#endif
-}
 
 
 
 int AddCaret_(MultiGapBuffer *buffer, int pos)
 { 
-	// do no rebalancing, that's done on first insirt.
+	// do no rebalancing, that's done on first insert.
 	// this speeds things up if multiple cursors are added at once.
 	MGB_Iterator it = getIterator(buffer, pos);
 	BufferBlock *old_block = &buffer->blocks.start[it.block_index];
@@ -419,8 +381,11 @@ int AddCaret_(MultiGapBuffer *buffer, int pos)
 	new_block.start = old_block->start + it.sub_index;
 	new_block.length = old_block->length - it.sub_index;
 	old_block->length = it.sub_index;
+	
 	buffer->blocks.insert(new_block, it.block_index + 1);
-	return it.block_index + 1;
+	int caret_index = it.block_index;
+	while (caret_index < buffer->blocks.length - 2 && getGap(buffer, caret_index).next->length == 0 )++caret_index; // we always do this at the end, we need internal consistency for history to work :)
+	return caret_index;
 }
 
 void AddCaretWithId(MultiGapBuffer *buffer, int textBuffer_index, int pos, int Id)
@@ -429,39 +394,33 @@ void AddCaretWithId(MultiGapBuffer *buffer, int textBuffer_index, int pos, int I
 	{
 		assert(buffer->cursor_ids.start[i].id != Id);
 	}
-	buffer->cursor_ids.insert({ textBuffer_index, Id}, AddCaret_(buffer, pos) - 1);
-	order_mgb(buffer);
+	buffer->cursor_ids.insert({ textBuffer_index, Id}, AddCaret_(buffer, pos));
 }
 
 int AddCaret(MultiGapBuffer *buffer, int textBuffer_index, int pos)
 {
 	int index;
-	if (buffer->running_cursor_id == 994) // the first index is implicit. which is not great but it does simplyfy things
+	if (buffer->running_cursor_id == 994) // the first index is implicit. which is not great but it does simplyfy things ((slightly))
 	{
 		buffer->cursor_ids[0].textBuffer_index = textBuffer_index;
 	}
 	else
 	{
 		index = AddCaret_(buffer, pos);
-		buffer->cursor_ids.insert({ textBuffer_index, buffer->running_cursor_id }, index - 1);
+		buffer->cursor_ids.insert({ textBuffer_index, buffer->running_cursor_id }, index);
 	}
-	order_mgb(buffer);
 	return buffer->running_cursor_id++;
 }
 
-
-
 void appendCharacter(MultiGapBuffer *buffer, int caretId, char character)
 {
-
 	maybeGrow(buffer);
-	int caretIndex = indexFromId(buffer,caretId);
+	int caretIndex = indexFromId(buffer, caretId);
 	Gap gap= getGap(buffer,caretIndex);
 	assert(gap.length);
-
+	
 	gap.prev->length++;
 	*end(buffer, *gap.prev) = character;
-	
 }
 
 void invDelete(MultiGapBuffer *buffer, int caretId, char character)
@@ -470,38 +429,45 @@ void invDelete(MultiGapBuffer *buffer, int caretId, char character)
 	int caretIndex = indexFromId(buffer, caretId);
 	Gap gap = getGap(buffer,caretIndex);
 	assert(gap.length);
-
+	
 	--gap.next->start;
 	gap.next->length++;
-	*start(buffer, *gap.next) = character;
+	*start(buffer, *gap.next)= character;
 }
 
 bool removeCharacter(MultiGapBuffer *buffer,History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
-	caretIndex = internal_push_index(buffer, history, -1, caretIndex,log);
+
+	caretIndex = internal_push_index(buffer, history, -1, caretIndex, log);
 	BufferBlock *prev = getGap(buffer,caretIndex).prev;
-	if (!prev->length) return false;
-	--prev->length;
+	if (prev->length) {
+		--prev->length;
+		return true;
+	} else {
+		return false;
+	}
 }
 
-bool del(MultiGapBuffer *buffer,History *history, bool log, int caretId)
-{
-
+bool del(MultiGapBuffer *buffer, History *history, bool log, int caretId) {
 	int caretIndex = indexFromId(buffer, caretId);
 	caretIndex = internal_push_index(buffer, history, 1, caretIndex, log);
-	BufferBlock *next= getGap(buffer, caretIndex).next;
-	if (!next->length) return false;
-	--next->length;
-	++next->start;
+	BufferBlock *next = getGap(buffer, caretIndex).next;
+	if (next->length) {
+		--next->length;
+		++next->start;
+		return true;
+	} else {
+		return false;
+	}
 }
 
-
-
-void removeCaret(MultiGapBuffer *buffer, int caretId)
+void removeCaret(MultiGapBuffer *buffer, History *history, int caretId)
 {
 	//ie mergeblocks
 	int caretIndex = indexFromId(buffer, caretId);
+	caretIndex = internal_push_index(buffer, history, 1, caretIndex, true);    // we always do this at the end, we need internal consistency for history to work :)
+
 	BufferBlock *prev = &buffer->blocks.start[caretIndex];
 	BufferBlock *next = &buffer->blocks.start[caretIndex + 1];
 	if (next->length != 0)
@@ -610,7 +576,6 @@ void CheckOverlapp(MultiGapBuffer *buffer)
 bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
-	caretIndex = internal_push_index(buffer,history,caretIndex,-1,log);
 	assert(caretIndex >= 0 && caretIndex <= buffer->blocks.length - 2);
 	BufferBlock *p = &buffer->blocks.start[caretIndex];
 	BufferBlock *n = &buffer->blocks.start[caretIndex + 1];
@@ -618,37 +583,42 @@ bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretI
 	if ((caretIndex == 0 && p->length == 0))
 		return false;
 	
-	assert(p->length);
+	if (!p->length)
+	{
+		internal_move_index(buffer,history,-1,caretIndex,log);
+		CheckOverlapp(buffer);
+		return mgb_moveLeft(buffer,history,log,caretId);
+	}
 	
 	++n->length;
 	--n->start;
 	*start(buffer, *n) = *end(buffer, *p);
 	--p->length;
 	CheckOverlapp(buffer);
-	order_mgb(buffer);
 	return true;
 }
 
 bool mgb_moveRight(MultiGapBuffer *buffer, History *history, bool log, int caretId)
 {
 	int caretIndex = indexFromId(buffer, caretId);
-	caretIndex = internal_push_index(buffer, history, caretIndex, 1,log);
 	assert(caretIndex >= 0 && caretIndex <= buffer->blocks.length - 2);
 	BufferBlock *p = &buffer->blocks.start[caretIndex];
 	BufferBlock *n = &buffer->blocks.start[caretIndex + 1];
 
 	if ((caretIndex == buffer->blocks.length - 2 && n->length == 0))
 		return false;
-	assert(n->length);
-	
+
+	if (n->length == 0)
+	{
+		internal_move_index(buffer, history, 1, caretIndex,log);
+		CheckOverlapp(buffer);
+		return mgb_moveRight(buffer,history, log,caretId);
+	}
 
 	++p->length;
 	*end(buffer, *p) = *start(buffer, *n);
 	++n->start;
 	--n->length;
-	order_mgb(buffer);
 	return true;
 }
-
-
 

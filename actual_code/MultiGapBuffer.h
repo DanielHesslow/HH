@@ -59,7 +59,7 @@ internal int indexFromId(MultiGapBuffer *buffer, int id);
 internal MGB_Iterator getIteratorFromCaret(MultiGapBuffer *buffer, int id);
 internal int AddCaret(MultiGapBuffer *buffer,int textBuffer_index, int i);
 internal bool del(MultiGapBuffer *buffer, History *history, bool log, int caretId);
-internal void removeCaret(MultiGapBuffer *buffer, int caretId);
+internal void removeCaret(MultiGapBuffer *buffer, History *history, int caretId);
 internal void removeEmpty(TextBuffer *textBuffer);
 internal bool mgb_moveLeft(MultiGapBuffer *buffer, History *history, bool log, int caretId);
 internal bool mgb_moveRight(MultiGapBuffer *buffer, History *history, bool log, int caretId);

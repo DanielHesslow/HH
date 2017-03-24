@@ -1814,28 +1814,14 @@ internal TextBuffer *allocTextBuffer(int initialMultiGapBufferSize, int initialL
 	return textBuffer;
 }
 
-void InsertCaret(TextBuffer *buffer, int pos, int index)  //for history reasons.
-{
-	//WHAT
-
-	// why the fuck does it say WHAT here? //slightly older Daniel
-	// also what the fuck for history reasons, we havn't released anything dude.
-	// lol fuck me trying to be funny. History reasons is because of the history module hehe.
-
-	int id_sel = AddCaret(buffer->backingBuffer->buffer, buffer->textBuffer_id, pos);
-	buffer->ownedSelection_id.insert(id_sel, index);
-	int id = AddCaret(buffer->backingBuffer->buffer,buffer->textBuffer_id, pos);
-	buffer->ownedCarets_id.insert(id, index);
-	CursorInfo info= {};
-	buffer->cursorInfo.insert(info, index);
-}
 
 void AddCaret(TextBuffer *textBuffer, int pos)
 { 
-	int id_sel = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, pos);
-	textBuffer->ownedSelection_id.add(id_sel);
 	int id = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, pos);
 	textBuffer->ownedCarets_id.add(id);
+	int id_sel = AddCaret(textBuffer->backingBuffer->buffer, textBuffer->textBuffer_id, pos);
+	textBuffer->ownedSelection_id.add(id_sel);
+
 	log_add_cursor(&textBuffer->backingBuffer->history, pos, false,  id, textBuffer->textBuffer_id);
 	log_add_cursor(&textBuffer->backingBuffer->history, pos, true, id_sel, textBuffer->textBuffer_id);
 	CursorInfo info = {};
@@ -1846,18 +1832,19 @@ internal void removeCaret(TextBuffer *textBuffer, int caretIdIndex, bool log)
 {
 	int pos_caret = getCaretPos(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[caretIdIndex]);
 	int pos_selection = getCaretPos(textBuffer->backingBuffer->buffer, textBuffer->ownedSelection_id.start[caretIdIndex]);
-	if (log)
-	{
-		log_remove_cursor(&textBuffer->backingBuffer->history, pos_caret,    false, textBuffer->ownedCarets_id.start[caretIdIndex],    textBuffer->textBuffer_id);
+	
+	removeCaret(textBuffer->backingBuffer->buffer, &textBuffer->backingBuffer->history,textBuffer->ownedCarets_id.start[caretIdIndex]);
+	removeCaret(textBuffer->backingBuffer->buffer, &textBuffer->backingBuffer->history, textBuffer->ownedSelection_id.start[caretIdIndex]);
+	
+	if (log) {
+		log_remove_cursor(&textBuffer->backingBuffer->history, pos_caret, false, textBuffer->ownedCarets_id.start[caretIdIndex], textBuffer->textBuffer_id);
 		log_remove_cursor(&textBuffer->backingBuffer->history, pos_selection, true, textBuffer->ownedSelection_id.start[caretIdIndex], textBuffer->textBuffer_id);
 	}
 
-	removeCaret(textBuffer->backingBuffer->buffer, textBuffer->ownedCarets_id.start[caretIdIndex]);
 	textBuffer->ownedCarets_id.removeOrd(caretIdIndex);
-	removeCaret(textBuffer->backingBuffer->buffer, textBuffer->ownedSelection_id.start[caretIdIndex]);
 	textBuffer->ownedSelection_id.removeOrd(caretIdIndex);
-}
 
+}
 
 internal TextBuffer *createTextBufferFromBackingBuffer(BackingBuffer *backingBuffer, String file_name)
 {
@@ -1883,8 +1870,6 @@ internal void freeTextBuffer(TextBuffer *buffer)
 	buffer->commonBuffer.allocator->parent->tfree<DH_SlowTrackingArena>(&buffer->commonBuffer.allocator);
 	buffer->allocator->parent->tfree<DH_SlowTrackingArena>(&buffer->allocator);
 }
-
-
 
 internal TextBuffer *openCommanLine()
 {
@@ -1952,20 +1937,7 @@ internal void hideCommandLine(Data *data)
 	data->isCommandlineActive = false;
 }
 
-#if 0
-internal void createFile(Data *data, DHSTR_String name)
-{
-	TextBuffer *textBuffer = allocTextBuffer(2000, 2000, 2000, 2000);
-	textBuffer->fileName = name;
-	initTextBuffer(textBuffer);
-	Add(&data->textBuffers, textBuffer);
-	saveFile(&textBuffer);
-	data->updateAllBuffers = true;
-	hideCommandLine(data);
-}
-#endif
 // ----	colors
-
 internal int grayScaleToColor(uint8 org, int foregroundColor, int backgroundColor)
 {
 	float blend =  org    / (float)255;
@@ -2093,29 +2065,6 @@ uint64_t get_clock_cycle()
 	QueryPerformanceCounter(&timeStamp_li);
 	return timeStamp_li.QuadPart;
 }
-
-internal float test_memset(int *mine, int *std)
-{
-	int arr[20000];
-	int len=1000;
-	int tests = 2000;
-	uint64_t start = get_clock_cycle();
-	for (int i = 0; i < tests; i++)
-	{
-		memset_32(arr, 5, len);
-	}
-	uint64_t mid = get_clock_cycle();
-	for (int i = 0; i < tests; i++)
-	{
-		memset(arr, 5, len*sizeof(int));
-	}
-	uint64_t end = get_clock_cycle();
-	*mine = (int)mid - start;
-	*std = (int)end- mid;
-	volatile float mine_times_faster = (float)(*std)/ (float)(*mine);
-	return mine_times_faster;
-}
-
 
 
 // bliting a char bitmap 8 pixels at a time. x is specified in thirds of a pixel granuality, y is specified in whole pixel granuality.
