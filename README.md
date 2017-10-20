@@ -34,6 +34,7 @@ At somepoint
 - [ ] networked mode
 - [ ] multiple files single buffer mode
 - [ ] hardware rendering 
+- [ ] hinting for font rendering (patent problem?)
 
 Ports:
 - [x] Windows
