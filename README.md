@@ -1,3 +1,5 @@
+# Texteditor
+
 This is my attempt at making a code editor. Or was. It's currently under a thick layer of ice. 
 
 The goal is to be able to move from visual studio to this.
@@ -40,3 +42,13 @@ Ports:
 - [x] Windows
 - [ ] Mac
 - [ ] Linux
+
+## Notes
+
+We should probably actually use the standard library. Fun experiment to do everything myself, but mostly a waste of time. Everything is single threaded because it's a texteditor, it shouldn't need more threads. Still like unity-builds. 
+
+We'll see if I get back to this. Currently doing other things that seems more fun for now. But I might circle back :)
+
+
+
+
