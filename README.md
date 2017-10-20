@@ -20,11 +20,11 @@ The features that are important:
 - [x] color markdown
 - [x] customization (currently hotloading DLLs)
 - [ ] intellisence
-- [/] search (file / folder) 
+- [ ] see search matches in new virtual file (file / folder) 
 - [x] smooth scrolling
 - [ ] virtual whitespace?
 - [x] i3-style window manager for buffers
-- [/] tree based history ie. crtl-z doesn't remove stuff only branch, (currently buggy and complicated scheme to reduce size, maybe do simple thing but add an layer of compression) also not clear what even should happen for editions in mutliple views and undo in one.
+- [x] tree based history ie. crtl-z doesn't remove stuff only branch, (currently buggy and complicated scheme to reduce size, maybe do simple thing but add an layer of compression) also not clear what even should happen in all cases for editions in mutliple views and undo in one.
 - [x] title's ie. special comments with different font size
 
 
