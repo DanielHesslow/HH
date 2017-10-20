@@ -30,7 +30,6 @@ The features that are important:
 
 At somepoint
 - [ ] AST-search / replace
-- [ ] multibuffer
 - [ ] csi mode (multiple people typing, same computer)
 - [ ] networked mode
 - [ ] multiple files single buffer mode
